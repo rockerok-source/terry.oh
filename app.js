@@ -1,16 +1,16 @@
 const TIMEFRAMES = {
-  LIVE: { label: "실시간", vol: 0.004, mult: 0.65 },
-  "1m": { label: "1분봉", vol: 0.006, mult: 0.72 },
-  "3m": { label: "3분봉", vol: 0.008, mult: 0.78 },
-  "5m": { label: "5분봉", vol: 0.010, mult: 0.84 },
-  "10m": { label: "10분봉", vol: 0.012, mult: 0.90 },
-  "15m": { label: "15분봉", vol: 0.015, mult: 1.00 },
-  "30m": { label: "30분봉", vol: 0.019, mult: 1.12 },
-  "60m": { label: "60분봉", vol: 0.024, mult: 1.25 },
-  "240m": { label: "240분봉", vol: 0.032, mult: 1.45 },
-  "1D": { label: "일봉", vol: 0.045, mult: 1.75 },
-  "1W": { label: "주봉", vol: 0.075, mult: 2.30 },
-  "1M": { label: "월봉", vol: 0.120, mult: 3.10 }
+  LIVE: { label: "실시간", range: "1d", interval: "1m", vol: 0.004, mult: 0.65 },
+  "1m": { label: "1분봉", range: "1d", interval: "1m", vol: 0.006, mult: 0.72 },
+  "3m": { label: "3분봉", range: "1d", interval: "5m", vol: 0.008, mult: 0.78 },
+  "5m": { label: "5분봉", range: "1d", interval: "5m", vol: 0.010, mult: 0.84 },
+  "10m": { label: "10분봉", range: "5d", interval: "15m", vol: 0.012, mult: 0.90 },
+  "15m": { label: "15분봉", range: "5d", interval: "15m", vol: 0.015, mult: 1.00 },
+  "30m": { label: "30분봉", range: "5d", interval: "30m", vol: 0.019, mult: 1.12 },
+  "60m": { label: "60분봉", range: "1mo", interval: "60m", vol: 0.024, mult: 1.25 },
+  "240m": { label: "240분봉", range: "3mo", interval: "1d", vol: 0.032, mult: 1.45 },
+  "1D": { label: "일봉", range: "6mo", interval: "1d", vol: 0.045, mult: 1.75 },
+  "1W": { label: "주봉", range: "2y", interval: "1wk", vol: 0.075, mult: 2.30 },
+  "1M": { label: "월봉", range: "5y", interval: "1mo", vol: 0.120, mult: 3.10 }
 };
 
 const TICKER_PRESETS = {
@@ -24,6 +24,11 @@ const TICKER_PRESETS = {
   SPY: { base: 596.50, sector: "S&P 500 대형주 벤치마크", bias: 0.28, pcr: 0.92, shortPct: 1.45, sns: 65 }
 };
 
+const CORS_PROXIES = [
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`
+];
+
 const state = {
   ticker: "NVDA",
   timeframe: "15m",
@@ -33,7 +38,14 @@ const state = {
   prices: [],
   mddSeries: [],
   oscSeries: [],
-  macro: { fg: 64, vix: 15.82, gpr: 112.4 }
+  dataSourceMode: "SIMULATION",
+  lastSyncTime: "",
+  macro: {
+    fg: 64,
+    fgRating: "탐욕",
+    vix: 15.82,
+    gpr: 112.4
+  }
 };
 
 function getProfile(ticker) {
@@ -48,7 +60,7 @@ function getProfile(ticker) {
   return { base, sector: "미국 증시 · 퀀트 유니버스", bias, pcr, shortPct, sns };
 }
 
-function generateSeries() {
+function generateFallbackSeries() {
   const prof = getProfile(state.ticker);
   const tf = TIMEFRAMES[state.timeframe];
   const len = 54;
@@ -61,6 +73,7 @@ function generateSeries() {
     arr.push(+cur.toFixed(2));
   }
   state.prices = arr;
+  state.dataSourceMode = "SIMULATION";
   recomputeDerived();
 }
 
@@ -78,15 +91,125 @@ function recomputeDerived() {
   });
 }
 
+async function fetchJsonWithProxy(targetUrl, timeoutMs = 4500) {
+  const candidates = [
+    targetUrl,
+    ...CORS_PROXIES.map((makeProxy) => makeProxy(targetUrl))
+  ];
+
+  for (const url of candidates) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (!text) continue;
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.contents === "string") {
+        return JSON.parse(parsed.contents);
+      }
+      return parsed;
+    } catch {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
+async function fetchYahooChart(symbol, range, interval) {
+  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&includePrePost=true`;
+  const data = await fetchJsonWithProxy(yahooUrl);
+  const result = data?.chart?.result?.[0];
+  if (!result) return null;
+
+  const closes = result?.indicators?.quote?.[0]?.close || [];
+  const cleanPrices = closes
+    .filter((v) => typeof v === "number" && Number.isFinite(v) && v > 0)
+    .slice(-60)
+    .map((v) => +v.toFixed(2));
+
+  const metaPrice = result?.meta?.regularMarketPrice;
+  if (typeof metaPrice === "number" && Number.isFinite(metaPrice) && metaPrice > 0) {
+    if (cleanPrices.length > 0) {
+      cleanPrices[cleanPrices.length - 1] = +metaPrice.toFixed(2);
+    } else {
+      cleanPrices.push(+metaPrice.toFixed(2));
+    }
+  }
+
+  return cleanPrices.length >= 2 ? cleanPrices : null;
+}
+
+async function fetchCnnFearAndGreed() {
+  const cnnUrl = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata";
+  const data = await fetchJsonWithProxy(cnnUrl);
+  const fgScore = data?.fear_and_greed?.score;
+  const fgRating = data?.fear_and_greed?.rating;
+  if (typeof fgScore === "number" && Number.isFinite(fgScore)) {
+    const rounded = Math.round(fgScore);
+    const ratingMap = {
+      "extreme fear": "극단적 공포",
+      "fear": "공포",
+      "neutral": "중립",
+      "greed": "탐욕",
+      "extreme greed": "극단적 탐욕"
+    };
+    const key = String(fgRating || "").toLowerCase();
+    return {
+      score: rounded,
+      rating: ratingMap[key] || (rounded >= 55 ? "탐욕" : rounded <= 45 ? "공포" : "중립")
+    };
+  }
+  return null;
+}
+
+async function syncRealMarketData() {
+  const tf = TIMEFRAMES[state.timeframe];
+  const [tickerPrices, vixPrices, fgData] = await Promise.all([
+    fetchYahooChart(state.ticker, tf.range, tf.interval),
+    fetchYahooChart("^VIX", "5d", "15m"),
+    fetchCnnFearAndGreed()
+  ]);
+
+  let updatedAny = false;
+
+  if (tickerPrices && tickerPrices.length >= 2) {
+    state.prices = tickerPrices;
+    state.dataSourceMode = "LIVE_YAHOO";
+    recomputeDerived();
+    updatedAny = true;
+  }
+
+  if (vixPrices && vixPrices.length > 0) {
+    state.macro.vix = +vixPrices[vixPrices.length - 1].toFixed(2);
+    updatedAny = true;
+  }
+
+  if (fgData) {
+    state.macro.fg = fgData.score;
+    state.macro.fgRating = fgData.rating;
+    updatedAny = true;
+  }
+
+  if (updatedAny) {
+    const now = new Date();
+    state.lastSyncTime = now.toTimeString().slice(0, 8);
+  }
+
+  renderDashboard();
+}
+
 function computeIndicators() {
-  const p = state.prices;
+  const p = state.prices.length >= 2 ? state.prices : [100, 101];
   const last = p[p.length - 1];
   const first = p[0];
   const tf = TIMEFRAMES[state.timeframe];
   const prof = getProfile(state.ticker);
 
   const sliceRange = (n) => {
-    const sub = p.slice(-n);
+    const sub = p.slice(-Math.min(n, p.length));
     const hi = Math.max(...sub);
     const lo = Math.min(...sub);
     return hi === lo ? 50 : ((last - lo) / (hi - lo)) * 100;
@@ -96,23 +219,25 @@ function computeIndicators() {
   const sk12 = +sliceRange(12).toFixed(1);
   const sk20 = +sliceRange(20).toFixed(1);
 
-  const sma20 = p.slice(-20).reduce((a, b) => a + b, 0) / 20;
-  const ema12 = p.slice(-12).reduce((a, b) => a + b, 0) / 12;
+  const sma20Arr = p.slice(-Math.min(20, p.length));
+  const ema12Arr = p.slice(-Math.min(12, p.length));
+  const sma20 = sma20Arr.reduce((a, b) => a + b, 0) / sma20Arr.length;
+  const ema12 = ema12Arr.reduce((a, b) => a + b, 0) / ema12Arr.length;
   const macd = +((ema12 - sma20) * (10 / tf.mult)).toFixed(2);
-  const rsi = +Math.max(15, Math.min(88, 50 + ((last - sma20) / sma20) * 420)).toFixed(1);
+  const rsi = +Math.max(15, Math.min(88, 50 + ((last - sma20) / (sma20 || 1)) * 420)).toFixed(1);
   const mfi = +Math.max(18, Math.min(90, rsi + prof.bias * 6)).toFixed(1);
-  const momentum = +(((last - p[Math.max(0, p.length - 10)]) / p[Math.max(0, p.length - 10)]) * 100).toFixed(2);
+  const momBase = p[Math.max(0, p.length - 10)] || first;
+  const momentum = +(((last - momBase) / (momBase || 1)) * 100).toFixed(2);
   const vr = +Math.max(65, Math.min(240, 118 + momentum * 11)).toFixed(0);
   const obvTrend = momentum >= 0 ? "매집 유입 (+)" : "분산 유출 (-)";
-  const envPct = +(((last - sma20) / sma20) * 100).toFixed(2);
+  const envPct = +(((last - sma20) / (sma20 || 1)) * 100).toFixed(2);
 
-  // Quant composite score (1~100)
   const techScore = (rsi * 0.35 + sk12 * 0.35 + (macd >= 0 ? 72 : 36) * 0.3);
   const flowScore = Math.max(20, Math.min(95, (1.2 - prof.pcr) * 75 + prof.sns * 0.45));
   const macroScore = Math.max(25, Math.min(90, state.macro.fg * 0.65 + (30 - state.macro.vix) * 1.4));
   const totalScore = Math.round(Math.max(1, Math.min(100, techScore * 0.35 + flowScore * 0.4 + macroScore * 0.25)));
 
-  const currentMdd = Math.min(...state.mddSeries);
+  const currentMdd = state.mddSeries.length > 0 ? Math.min(...state.mddSeries) : 0;
   const oscNow = state.oscSeries[state.oscSeries.length - 1] || 0;
 
   return {
@@ -142,7 +267,6 @@ function drawCharts(ind) {
   const mCanvas = document.getElementById("mddChartCanvas");
   const oCanvas = document.getElementById("oscillatorCanvas");
 
-  // Resize canvases for crisp iPhone Retina rendering
   [pCanvas, mCanvas, oCanvas].forEach((c) => {
     const rect = c.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -152,7 +276,6 @@ function drawCharts(ind) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   });
 
-  // 1. Price Chart
   const pCtx = pCanvas.getContext("2d");
   const pw = pCanvas.getBoundingClientRect().width;
   const ph = pCanvas.getBoundingClientRect().height;
@@ -164,10 +287,9 @@ function drawCharts(ind) {
   const allVals = [...state.prices, ...(state.showEnv ? [...upperEnv, ...lowerEnv] : [])];
   const minP = Math.min(...allVals) * 0.996;
   const maxP = Math.max(...allVals) * 1.004;
-  const toX = (i) => (i / (state.prices.length - 1)) * (pw - 12) + 6;
+  const toX = (i) => (i / Math.max(1, state.prices.length - 1)) * (pw - 12) + 6;
   const toY = (v) => ph - 8 - ((v - minP) / (maxP - minP || 1)) * (ph - 16);
 
-  // Support & Resistance Lines
   if (state.showSr) {
     const r1 = ind.last * (1 + 0.018 * ind.tf.mult);
     const s1 = ind.last * (1 - 0.018 * ind.tf.mult);
@@ -189,7 +311,6 @@ function drawCharts(ind) {
     });
   }
 
-  // Envelope Bands
   if (state.showEnv) {
     [upperEnv, lowerEnv].forEach((band) => {
       pCtx.strokeStyle = "rgba(167, 139, 250, 0.45)";
@@ -200,7 +321,6 @@ function drawCharts(ind) {
     });
   }
 
-  // Main Price Line
   const isUp = ind.last >= ind.first;
   pCtx.strokeStyle = isUp ? "#10b981" : "#f43f5e";
   pCtx.lineWidth = 2;
@@ -208,13 +328,12 @@ function drawCharts(ind) {
   state.prices.forEach((v, i) => (i === 0 ? pCtx.moveTo(toX(i), toY(v)) : pCtx.lineTo(toX(i), toY(v))));
   pCtx.stroke();
 
-  // 2. MDD Underwater Chart
   const mCtx = mCanvas.getContext("2d");
   const mw = mCanvas.getBoundingClientRect().width;
   const mh = mCanvas.getBoundingClientRect().height;
   mCtx.clearRect(0, 0, mw, mh);
 
-  if (state.showMdd) {
+  if (state.showMdd && state.mddSeries.length > 0) {
     const minMdd = Math.min(-2, Math.min(...state.mddSeries) * 1.15);
     const mToY = (v) => 4 + (v / minMdd) * (mh - 8);
     mCtx.fillStyle = "rgba(244, 63, 94, 0.18)";
@@ -229,7 +348,6 @@ function drawCharts(ind) {
     mCtx.stroke();
   }
 
-  // 3. Buy/Sell Oscillator Wave
   const oCtx = oCanvas.getContext("2d");
   const ow = oCanvas.getBoundingClientRect().width;
   const oh = oCanvas.getBoundingClientRect().height;
@@ -242,9 +360,9 @@ function drawCharts(ind) {
   oCtx.lineTo(ow, midY);
   oCtx.stroke();
 
-  const barW = Math.max(2, (ow - 12) / state.oscSeries.length - 1.5);
+  const barW = Math.max(2, (ow - 12) / Math.max(1, state.oscSeries.length) - 1.5);
   state.oscSeries.forEach((val, i) => {
-    const x = 6 + (i / state.oscSeries.length) * (ow - 12);
+    const x = 6 + (i / Math.max(1, state.oscSeries.length)) * (ow - 12);
     const h = Math.abs(val) * (midY - 4);
     oCtx.fillStyle = val >= 0 ? "#10b981" : "#f43f5e";
     oCtx.fillRect(x, val >= 0 ? midY - h : midY, barW, Math.max(2, h));
@@ -253,9 +371,12 @@ function drawCharts(ind) {
 
 function renderDashboard() {
   const ind = computeIndicators();
-  const chgPct = (((ind.last - ind.first) / ind.first) * 100).toFixed(2);
+  const chgPct = (((ind.last - ind.first) / (ind.first || 1)) * 100).toFixed(2);
+  const modeLabel = state.dataSourceMode === "LIVE_YAHOO"
+    ? `실시세 ${state.lastSyncTime || "SYNC"}`
+    : "시뮬레이션(피드대기)";
 
-  document.getElementById("activeTfPill").textContent = `${ind.tf.label} · LIVE`;
+  document.getElementById("activeTfPill").textContent = `${ind.tf.label} · ${modeLabel}`;
   document.getElementById("indTfLabel").textContent = ind.tf.label;
   document.getElementById("dispTicker").textContent = state.ticker;
   document.getElementById("dispSector").textContent = ind.prof.sector;
@@ -266,7 +387,6 @@ function renderDashboard() {
   chgEl.className = `chg-badge ${chgPct >= 0 ? "up" : "down"}`;
   document.getElementById("dispMdd").textContent = `${ind.currentMdd.toFixed(2)}%`;
 
-  // Support & Resistance
   const step1 = 0.018 * ind.tf.mult;
   const step2 = 0.036 * ind.tf.mult;
   document.getElementById("r2Val").textContent = `$${(ind.last * (1 + step2)).toFixed(2)}`;
@@ -274,7 +394,6 @@ function renderDashboard() {
   document.getElementById("s1Val").textContent = `$${(ind.last * (1 - step1)).toFixed(2)}`;
   document.getElementById("s2Val").textContent = `$${(ind.last * (1 - step2)).toFixed(2)}`;
 
-  // Quant Composite Score
   const scoreEl = document.getElementById("quantScoreVal");
   const ringEl = document.getElementById("scoreRing");
   const gradeEl = document.getElementById("quantGrade");
@@ -293,13 +412,11 @@ function renderDashboard() {
     gradeEl.style.color = "#f43f5e";
   }
 
-  // Oscillator Badge
   const oscBadge = document.getElementById("oscSignalBadge");
   const isBuyOsc = ind.oscNow >= 0;
   oscBadge.textContent = `${isBuyOsc ? "BUY" : "SELL"} ${ind.oscNow >= 0 ? "+" : ""}${ind.oscNow.toFixed(2)}`;
   oscBadge.className = `sig-pill ${isBuyOsc ? "buy" : "sell"}`;
 
-  // Short & Put/Call Options
   const pcr = ind.prof.pcr;
   const domEl = document.getElementById("optDominance");
   const callDom = pcr <= 0.85;
@@ -311,13 +428,11 @@ function renderDashboard() {
   document.getElementById("riskLevelVal").textContent =
     ind.prof.shortPct > 5 ? `높음 (VaR ${varPct}%)` : `적정 (VaR ${varPct}%)`;
 
-  // Global SNS Sentiment
   const sns = Math.min(99, Math.max(12, Math.round(ind.prof.sns + ind.oscNow * 6)));
   document.getElementById("snsScoreVal").textContent = sns;
   document.getElementById("snsBar").style.width = `${sns}%`;
   document.getElementById("snsLabel").textContent = sns >= 65 ? "낙관적 매수심리" : sns >= 45 ? "관망·혼조세" : "공포·매도심리";
 
-  // Technical Indicators Grid
   const indicators = [
     { name: "Slow %K (5,3,3)", val: `${ind.sk5}`, sig: ind.sk5 < 25 ? "매수" : ind.sk5 > 78 ? "과열" : "중립" },
     { name: "Slow %K (12,5,5)", val: `${ind.sk12}`, sig: ind.sk12 >= 50 ? "매수" : "매도" },
@@ -351,7 +466,6 @@ function renderDashboard() {
     })
     .join("");
 
-  // Dark Pool, Institutional, Smart Money & Sector Rotation
   const dpPct = (41.5 + (ind.totalScore % 14) * 0.7).toFixed(1);
   const instFlow = ind.totalScore >= 55 ? `+$${(ind.totalScore * 3.4).toFixed(0)}M 순매수` : `-$${((100 - ind.totalScore) * 2.8).toFixed(0)}M 순매도`;
   const smartPos = ind.totalScore >= 60 ? "기관 콜 스프레드 · 순매집" : "헤지 풋 비중 확대 · 관망";
@@ -364,23 +478,22 @@ function renderDashboard() {
     <div class="flow-item"><span>미국 섹터 수급 이동</span><strong>${sectorFlow}</strong></div>
   `;
 
-  // Macro Bar
-  document.getElementById("fgVal").textContent = `${Math.round(state.macro.fg)} (${state.macro.fg >= 55 ? "탐욕" : "중립"})`;
+  document.getElementById("fgVal").textContent = `${Math.round(state.macro.fg)} (${state.macro.fgRating})`;
   document.getElementById("vixVal").textContent = state.macro.vix.toFixed(2);
   document.getElementById("gprVal").textContent = `${state.macro.gpr.toFixed(1)} (주의)`;
 
   drawCharts(ind);
 }
 
-// Event Bindings
 document.getElementById("tickerForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const val = document.getElementById("tickerInput").value.trim().toUpperCase();
   if (!val) return;
   state.ticker = val;
   document.querySelectorAll(".q-chip").forEach((b) => b.classList.toggle("active", b.dataset.ticker === val));
-  generateSeries();
+  generateFallbackSeries();
   renderDashboard();
+  syncRealMarketData();
 });
 
 document.getElementById("quickTickers").addEventListener("click", (e) => {
@@ -389,8 +502,9 @@ document.getElementById("quickTickers").addEventListener("click", (e) => {
   state.ticker = btn.dataset.ticker;
   document.getElementById("tickerInput").value = state.ticker;
   document.querySelectorAll(".q-chip").forEach((b) => b.classList.toggle("active", b === btn));
-  generateSeries();
+  generateFallbackSeries();
   renderDashboard();
+  syncRealMarketData();
 });
 
 document.getElementById("tfSelector").addEventListener("click", (e) => {
@@ -398,8 +512,9 @@ document.getElementById("tfSelector").addEventListener("click", (e) => {
   if (!btn) return;
   state.timeframe = btn.dataset.tf;
   document.querySelectorAll(".tf-btn").forEach((b) => b.classList.toggle("active", b === btn));
-  generateSeries();
+  generateFallbackSeries();
   renderDashboard();
+  syncRealMarketData();
 });
 
 ["toggleMdd", "toggleEnv", "toggleSr"].forEach((id) => {
@@ -411,25 +526,12 @@ document.getElementById("tfSelector").addEventListener("click", (e) => {
   });
 });
 
-// Real-time streaming tick every 1.5s
 setInterval(() => {
-  const tf = TIMEFRAMES[state.timeframe];
-  const prof = getProfile(state.ticker);
-  const last = state.prices[state.prices.length - 1];
-  const delta = (Math.random() - 0.48 + prof.bias * 0.04) * tf.vol * 0.45;
-  const next = Math.max(1, +(last * (1 + delta)).toFixed(2));
-  state.prices.shift();
-  state.prices.push(next);
-
-  state.macro.fg = Math.max(15, Math.min(88, state.macro.fg + (Math.random() - 0.5) * 0.8));
-  state.macro.vix = Math.max(11, Math.min(35, state.macro.vix + (Math.random() - 0.5) * 0.14));
-  state.macro.gpr = Math.max(85, Math.min(180, state.macro.gpr + (Math.random() - 0.5) * 0.4));
-
-  recomputeDerived();
-  renderDashboard();
-}, 1500);
+  syncRealMarketData();
+}, 15000);
 
 window.addEventListener("resize", renderDashboard);
 
-generateSeries();
+generateFallbackSeries();
 renderDashboard();
+syncRealMarketData();
