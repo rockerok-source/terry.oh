@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>INNO 리볼버 퀀트 시스템 | Wall Street Quant Terminal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg-base: #070b14;
+      --bg-panel: #0d1424;
+      --bg-card: #121c31;
+      --border-subtle: #1e2d4a;
+      --accent-cyan: #00e5ff;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --accent-amber: #f59e0b;
+      --accent-violet: #a855f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background-color: var(--bg-base);
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif;
+      font-variant-numeric: tabular-nums;
+      overflow-x: hidden;
+    }
+    .panel {
+      background: linear-gradient(180deg, rgba(16,25,45,0.96) 0%, rgba(11,18,34,0.98) 100%);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+    .sub-card {
+      background: rgba(18, 28, 49, 0.85);
+      border: 1px solid rgba(51, 78, 122, 0.45);
+      border-radius: 9px;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 9999px;
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+      animation: pulseAnim 1.4s infinite;
+    }
+    @keyframes pulseAnim {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.35); opacity: 0.55; }
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #070b14; }
+    ::-webkit-scrollbar-thumb { background: #243656; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #37517e; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Macro & System Header -->
+  <header class="border-b border-[#1e2d4a] bg-[#090f1c]/95 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-[1920px] mx-auto px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <!-- Brand & Ticker Input -->
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-2.5 pr-2 border-r border-[#1e2d4a]">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500/20 via-blue-600/20 to-purple-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-300 font-black text-sm tracking-tighter">
+            INNO
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-sm md:text-base font-extrabold tracking-tight text-white">INNO 리볼버 퀀트 시스템</h1>
+              <span class="px-1.5 py-0.5 text-[10px] font-bold rounded bg-cyan-500/15 text-cyan-300 border border-cyan-400/30">QUANT v3.2</span>
+            </div>
+            <div class="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <span class="pulse-dot"></span>
+              <span id="streamStatusText">실시간 퀀트 엔진 스트리밍 중 (1.5s)</span>
+              <span class="text-slate-600">|</span>
+              <span id="clockDisplay" class="font-mono text-slate-300">--:--:--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ticker Search Form -->
+        <form id="tickerForm" class="flex items-center gap-1.5">
+          <div class="relative">
+            <input
+              id="tickerInput"
+              type="text"
+              value="NVDA"
+              maxlength="12"
+              placeholder="티커 입력 (예: NVDA, TSLA, AAPL)"
+              class="w-40 sm:w-48 bg-[#0d1628] border border-cyan-500/40 focus:border-cyan-400 focus:outline-none rounded-lg px-3 py-1.5 text-sm font-bold uppercase text-white placeholder-slate-500 tracking-wider"
+            />
+          </div>
+          <button
+            type="submit"
+            class="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold text-xs sm:text-sm transition cursor-pointer shadow-lg shadow-cyan-500/20"
+          >
+            분석 실행
+          </button>
+        </form>
+
+        <!-- Quick Tickers -->
+        <div class="hidden xl:flex items-center gap-1 text-xs">
+          <span class="text-slate-500 mr-1">빠른선택:</span>
+          <button data-quick="NVDA" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">NVDA</button>
+          <button data-quick="TSLA" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">TSLA</button>
+          <button data-quick="AAPL" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">AAPL</button>
+          <button data-quick="MSFT" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">MSFT</button>
+          <button data-quick="PLTR" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">PLTR</button>
+          <button data-quick="TQQQ" class="quick-btn px-2 py-1 rounded bg-slate-800/80 hover:bg-cyan-500/20 border border-slate-700 text-slate-200 font-semibold cursor-pointer">TQQQ</button>
+        </div>
+      </div>
+
+      <!-- Condition 8: Fear & Greed, VIX, Geopolitical Risk Index -->
+      <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div class="sub-card px-3 py-1.5 flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 font-medium">공포탐욕지수</span>
+          <span id="fngValue" class="text-sm font-black text-emerald-400">64</span>
+          <span id="fngLabel" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold">Greed</span>
+        </div>
+        <div class="sub-card px-3 py-1.5 flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 font-medium">VIX 변동성</span>
+          <span id="vixValue" class="text-sm font-black text-amber-400">15.82</span>
+          <span id="vixDelta" class="text-[11px] font-mono text-rose-400">-2.4%</span>
+        </div>
+        <div class="sub-card px-3 py-1.5 flex items-center gap-2">
+          <span class="text-[11px] text-slate-400 font-medium">지정학적위기(GPR)</span>
+          <span id="gprValue" class="text-sm font-black text-rose-400">118.4</span>
+          <span id="gprStatus" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold">경계</span>
+        </div>
+        <button id="toggleStreamBtn" class="px-2.5 py-1.5 rounded-lg border border-slate-700 hover:border-cyan-400/50 text-xs font-semibold text-slate-300 cursor-pointer">
+          일시정지
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace: 12-Column Grid (Chart takes 4 cols = 1/3 width on desktop) -->
+  <main class="max-w-[1920px] w-full mx-auto p-3 sm:p-4 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+    <!-- CONDITION 1: 1/3 Width Dedicated Stock Chart + MDD Line + Support/Resistance -->
+    <section class="lg:col-span-4 panel p-4 flex flex-col justify-between gap-3">
+      <div>
+        <!-- Asset Title & Live Price -->
+        <div class="flex items-start justify-between gap-2 pb-3 border-b border-[#1e2d4a]">
+          <div>
+            <div class="flex items-center gap-2">
+              <span id="activeTickerBadge" class="text-2xl font-black tracking-tight text-white">NVDA</span>
+              <span id="activeSectorBadge" class="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold">Semiconductors</span>
+            </div>
+            <p id="activeNameText" class="text-xs text-slate-400 mt-0.5">NVIDIA Corporation · NASDAQ Real-Time Quant Feed</p>
+          </div>
+          <div class="text-right">
+            <div id="livePriceText" class="text-2xl font-black font-mono text-white">$142.80</div>
+            <div id="liveChangeText" class="text-xs font-bold font-mono text-emerald-400">+$3.42 (+2.45%)</div>
+          </div>
+        </div>
+
+        <!-- Condition 7: Support & Resistance Price Zones + MDD Snapshot -->
+        <div class="grid grid-cols-3 gap-2 my-3">
+          <div class="sub-card p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-rose-400 font-bold">주요 저항선 (R1 / R2)</div>
+            <div id="resistanceText" class="text-xs sm:text-sm font-extrabold font-mono text-rose-300 mt-1">$146.50 / $151.20</div>
+            <div id="resistDistText" class="text-[10px] text-slate-400 mt-0.5">상방 여력 +2.59%</div>
+          </div>
+          <div class="sub-card p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">주요 지지선 (S1 / S2)</div>
+            <div id="supportText" class="text-xs sm:text-sm font-extrabold font-mono text-emerald-300 mt-1">$139.10 / $134.80</div>
+            <div id="supportDistText" class="text-[10px] text-slate-400 mt-0.5">하방 완충 -2.59%</div>
+          </div>
+          <div class="sub-card p-2.5">
+            <div class="text-[10px] uppercase tracking-wider text-amber-400 font-bold">현재 MDD / 최대낙폭</div>
+            <div id="mddCurrentText" class="text-xs sm:text-sm font-extrabold font-mono text-amber-300 mt-1">-2.14%</div>
+            <div id="mddPeakText" class="text-[10px] text-slate-400 mt-0.5">60일 MDD: -11.8%</div>
+          </div>
+        </div>
+
+        <!-- Price + Envelope + Support/Resistance Chart -->
+        <div class="sub-card p-2.5">
+          <div class="flex items-center justify-between text-[11px] mb-1.5 px-1">
+            <span class="font-bold text-slate-200">실시간 가격 · Envelope(20, 2.5%) · S/R 레벨</span>
+            <div class="flex items-center gap-2 text-[10px]">
+              <span class="text-cyan-300">● 현재가</span>
+              <span class="text-rose-400">-- 저항</span>
+              <span class="text-emerald-400">-- 지지</span>
+            </div>
+          </div>
+          <div class="h-56 sm:h-64 relative">
+            <canvas id="priceChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dedicated MDD Underwater Line Chart -->
+      <div class="sub-card p-2.5">
+        <div class="flex items-center justify-between text-[11px] mb-1 px-1">
+          <span class="font-bold text-amber-300">MDD (최대낙폭 / Drawdown) 실시간 선</span>
+          <span id="mddAlertBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold">낙폭 통제 양호</span>
+        </div>
+        <div class="h-28 relative">
+          <canvas id="mddChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right 8 Columns: Quant Score, Buy/Sell Oscillator, Short/Options/Sentiment & Wall St Factors -->
+    <section class="lg:col-span-8 flex flex-col gap-4">
+
+      <!-- Top Row: Condition 3 (Quant Score 1-100), Condition 4 (Short / Put-Call / Risk), Condition 6 (SNS Sentiment 1-100) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        <!-- Condition 3: INNO Quant Composite Score (1~100) -->
+        <div class="panel p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-cyan-300">INNO 퀀트 종합 점수</span>
+            <span id="quantGradeBadge" class="px-2 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">STRONG BUY · TIER 1</span>
+          </div>
+          <div class="my-2 flex items-end justify-between">
+            <div>
+              <div class="flex items-baseline gap-1">
+                <span id="quantScoreValue" class="text-4xl font-black font-mono text-white">84</span>
+                <span class="text-sm font-bold text-slate-400">/ 100</span>
+              </div>
+              <p id="quantScoreSummary" class="text-[11px] text-slate-400 mt-1">기술적 모멘텀 + 기관/다크풀 순유입 우세</p>
+            </div>
+            <div class="text-right text-[11px] space-y-1 font-mono">
+              <div class="text-cyan-300">테크니컬 <span id="subTechScore" class="font-bold">86</span></div>
+              <div class="text-purple-300">수급·옵션 <span id="subFlowScore" class="font-bold">85</span></div>
+              <div class="text-amber-300">매크로·섹터 <span id="subMacroScore" class="font-bold">79</span></div>
+            </div>
+          </div>
+          <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+            <div id="quantScoreBar" class="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-emerald-400 transition-all duration-500" style="width: 84%;"></div>
+          </div>
+        </div>
+
+        <!-- Condition 4: Short Interest, Put/Call Ratio Dominance & Risk Level -->
+        <div class="panel p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-purple-300">공매도 · 풋/콜 옵션 우위 & 위험도</span>
+            <span id="riskLevelBadge" class="px-2 py-0.5 rounded text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-400/40">위험도: 보통 (MODERATE)</span>
+          </div>
+          <div class="grid grid-cols-2 gap-2 my-2">
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400">풋/콜 옵션 비율 (PCR)</div>
+              <div id="pcrValue" class="text-base font-black font-mono text-white mt-0.5">0.64</div>
+              <div id="pcrDominance" class="text-[10px] font-bold text-emerald-400">콜 옵션 우위 (강세)</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400">공매도 비율 / 커버일수</div>
+              <div id="shortInterestText" class="text-base font-black font-mono text-white mt-0.5">4.8% <span class="text-xs text-slate-400">(1.6d)</span></div>
+              <div id="shortSqueezeText" class="text-[10px] font-bold text-cyan-300">숏스퀴즈 압력: 낮음</div>
+            </div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-slate-300 pt-1 border-t border-slate-800">
+            <span>일일 VaR (95%): <strong id="var95Text" class="font-mono text-rose-300">-2.85%</strong></span>
+            <span>감마 노출(GEX): <strong id="gexText" class="font-mono text-cyan-300">+$1.42B (양의감마)</strong></span>
+          </div>
+        </div>
+
+        <!-- Condition 6: Global SNS Investor Sentiment Index (1~100) -->
+        <div class="panel p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-emerald-300">글로벌 SNS 투자 심리 지수</span>
+            <span id="snsTrendBadge" class="px-2 py-0.5 rounded text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/40">버즈 급증 (+38%)</span>
+          </div>
+          <div class="my-2 flex items-end justify-between">
+            <div>
+              <div class="flex items-baseline gap-1">
+                <span id="snsScoreValue" class="text-4xl font-black font-mono text-white">76</span>
+                <span class="text-sm font-bold text-slate-400">/ 100</span>
+              </div>
+              <p id="snsSentimentLabel" class="text-[11px] text-emerald-300 font-semibold mt-1">X · Reddit · StockTwits 낙관 우세</p>
+            </div>
+            <div class="text-right text-[10px] text-slate-400 space-y-1 font-mono">
+              <div>X(Twitter): <span id="snsXVal" class="text-slate-200 font-bold">79</span></div>
+              <div>Reddit WSB: <span id="snsRedditVal" class="text-slate-200 font-bold">74</span></div>
+              <div>StockTwits: <span id="snsStVal" class="text-slate-200 font-bold">75</span></div>
+            </div>
+          </div>
+          <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+            <div id="snsScoreBar" class="h-full bg-gradient-to-r from-rose-500 via-amber-400 to-cyan-400 transition-all duration-500" style="width: 76%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Condition 2: Buy / Sell Signal Oscillator & Wall Street Quant Factors -->
+      <div class="panel p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#1e2d4a]">
+          <div>
+            <h2 class="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+              <span>월가 퀀트 매수(BUY) / 매도(SELL) 시그널 오실레이터</span>
+              <span id="signalActionBadge" class="px-2.5 py-0.5 rounded-md text-xs font-black bg-emerald-500 text-slate-950">BUY SIGNAL (+68)</span>
+            </h2>
+            <p class="text-[11px] text-slate-400 mt-0.5">
+              MACD · RSI · MFI · OBV · Slow %K(5,3,3 / 12,5,5 / 20,12,12) · Momentum · Envelope · VR · 다크풀 · 기관/스마트머니 · 지정학/매크로/섹터 통합 산출
+            </p>
+          </div>
+          <div class="flex items-center gap-3 text-xs font-mono">
+            <span class="text-emerald-400 font-bold">매수 압력: <span id="buyPressurePct">74%</span></span>
+            <span class="text-rose-400 font-bold">매도 압력: <span id="sellPressurePct">26%</span></span>
+          </div>
+        </div>
+
+        <!-- Oscillator Waveform Chart -->
+        <div class="mt-3 sub-card p-2.5">
+          <div class="flex items-center justify-between text-[11px] mb-1 px-1">
+            <span class="font-semibold text-slate-300">실시간 합성 시그널 오실레이터 (-100 매도극단 ~ +100 매수극단 · 임계선 +45 / -45)</span>
+            <span id="oscCurrentVal" class="font-mono font-bold text-emerald-400">+68.4</span>
+          </div>
+          <div class="h-40 relative">
+            <canvas id="oscillatorChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Technical Indicators Grid (MACD, RSI, MFI, OBV, Slow %K x3, Momentum, Envelope, VR) -->
+        <div class="mt-3">
+          <div class="text-xs font-bold text-slate-300 mb-2">핵심 기술적 보조지표 & 3중 Slow %K 스토캐스틱</div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2 text-center">
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">MACD</div>
+              <div id="indMacd" class="text-xs font-extrabold font-mono text-emerald-400 mt-1">+1.84</div>
+              <div id="indMacdSig" class="text-[10px] text-slate-400">골든크로스</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">RSI (14)</div>
+              <div id="indRsi" class="text-xs font-extrabold font-mono text-cyan-300 mt-1">62.4</div>
+              <div id="indRsiSig" class="text-[10px] text-slate-400">상승추세</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">MFI (14)</div>
+              <div id="indMfi" class="text-xs font-extrabold font-mono text-emerald-400 mt-1">67.8</div>
+              <div id="indMfiSig" class="text-[10px] text-slate-400">자금유입</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">OBV</div>
+              <div id="indObv" class="text-xs font-extrabold font-mono text-emerald-400 mt-1">+4.2M</div>
+              <div id="indObvSig" class="text-[10px] text-slate-400">고점돌파</div>
+            </div>
+            <div class="sub-card p-2 border-cyan-500/30">
+              <div class="text-[10px] text-cyan-300 font-bold">Slow%K(5,3,3)</div>
+              <div id="indSk1" class="text-xs font-extrabold font-mono text-white mt-1">78.2</div>
+              <div id="indSk1Sig" class="text-[10px] text-emerald-400">단기매수</div>
+            </div>
+            <div class="sub-card p-2 border-cyan-500/30">
+              <div class="text-[10px] text-cyan-300 font-bold">Slow%K(12,5,5)</div>
+              <div id="indSk2" class="text-xs font-extrabold font-mono text-white mt-1">71.5</div>
+              <div id="indSk2Sig" class="text-[10px] text-emerald-400">중기상승</div>
+            </div>
+            <div class="sub-card p-2 border-cyan-500/30">
+              <div class="text-[10px] text-cyan-300 font-bold">Slow%K(20,12,12)</div>
+              <div id="indSk3" class="text-xs font-extrabold font-mono text-white mt-1">65.9</div>
+              <div id="indSk3Sig" class="text-[10px] text-cyan-300">장기추세</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">Momentum</div>
+              <div id="indMom" class="text-xs font-extrabold font-mono text-emerald-400 mt-1">+5.12%</div>
+              <div id="indMomSig" class="text-[10px] text-slate-400">가속구간</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">Envelope</div>
+              <div id="indEnv" class="text-xs font-extrabold font-mono text-amber-300 mt-1">상단 +1.4%</div>
+              <div id="indEnvSig" class="text-[10px] text-slate-400">밴드상단접근</div>
+            </div>
+            <div class="sub-card p-2">
+              <div class="text-[10px] text-slate-400 font-bold">VR (20)</div>
+              <div id="indVr" class="text-xs font-extrabold font-mono text-purple-300 mt-1">168%</div>
+              <div id="indVrSig" class="text-[10px] text-slate-400">거래활발</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Row: Dark Pool, Institutional & Smart Money, Macro/Geopolitical/News, Sector Flow Rotation -->
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+
+        <!-- Dark Pool, Institutional & Smart Money + Macro/Geopolitical/News -->
+        <div class="xl:col-span-7 panel p-4 flex flex-col gap-3">
+          <div class="text-xs font-bold text-white flex items-center justify-between">
+            <span>다크풀 · 기관 수급 · 스마트머니 포지션 & 거시경제/지정학</span>
+            <span class="text-[10px] text-cyan-300 font-mono">INSTITUTIONAL FLOW ENGINE</span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="sub-card p-3">
+              <div class="text-[10px] text-slate-400 font-bold">다크풀 거래량 (ATS)</div>
+              <div id="darkPoolVol" class="text-base font-black font-mono text-cyan-300 mt-1">38.4% <span class="text-[11px] text-slate-400">비중</span></div>
+              <div id="darkPoolBias" class="text-[11px] text-emerald-400 font-semibold mt-1">블록 매수 우위 (+$214M)</div>
+            </div>
+            <div class="sub-card p-3">
+              <div class="text-[10px] text-slate-400 font-bold">기관 수급 (13F/실시간)</div>
+              <div id="instFlowVal" class="text-base font-black font-mono text-emerald-400 mt-1">+$482.5M</div>
+              <div id="instFlowTag" class="text-[11px] text-slate-300 mt-1">패시브·액티브 순매수 전환</div>
+            </div>
+            <div class="sub-card p-3">
+              <div class="text-[10px] text-slate-400 font-bold">스마트머니 포지션</div>
+              <div id="smartMoneyPos" class="text-base font-black font-mono text-purple-300 mt-1">NET LONG 72%</div>
+              <div id="smartMoneyNote" class="text-[11px] text-cyan-300 mt-1">콜 스프레드·선물 헤지 축소</div>
+            </div>
+          </div>
+
+          <!-- Macro Indicators & Geopolitical/Macro News Feed -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <div class="sub-card p-3">
+              <div class="text-[11px] font-bold text-amber-300 mb-2">핵심 매크로 & 지정학 지표</div>
+              <div class="space-y-1.5 text-xs font-mono">
+                <div class="flex justify-between">
+                  <span class="text-slate-400">미 10년물 국채금리 (US10Y)</span>
+                  <span id="macroUs10y" class="text-white font-bold">4.28% (-3bp)</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-400">달러 인덱스 (DXY)</span>
+                  <span id="macroDxy" class="text-white font-bold">104.12 (-0.18%)</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-400">WTI 원유 / 금 선물</span>
+                  <span id="macroCmd" class="text-slate-200">$71.4 / $2,685</span>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-400">지정학적 위기(GPR) 영향도</span>
+                  <span id="macroGeoImpact" class="text-amber-300 font-bold">중립~제한적 (-4pt)</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="sub-card p-3">
+              <div class="text-[11px] font-bold text-cyan-300 mb-2">거시경제 & 지정학 라이브 헤드라인</div>
+              <ul id="macroNewsList" class="space-y-1.5 text-[11px] text-slate-300 leading-snug">
+                <li class="flex items-start gap-1.5">
+                  <span class="text-emerald-400 font-bold">●</span>
+                  <span>연준(Fed) 위원 발언: 근원 인플레이션 둔화 추세 확인, 유동성 환경 우호적</span>
+                </li>
+                <li class="flex items-start gap-1.5">
+                  <span class="text-amber-400 font-bold">●</span>
+                  <span>중동·동유럽 해상 물류 및 공급망 리스크 모니터링 지속 (GPR 118.4)</span>
+                </li>
+                <li class="flex items-start gap-1.5">
+                  <span class="text-cyan-400 font-bold">●</span>
+                  <span>AI 데이터센터 CapEx 가이던스 상향 및 반도체·클라우드 수급 집중</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- US Sector Flow Rotation Matrix -->
+        <div class="xl:col-span-5 panel p-4 flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-white">미국 증시 주요 섹터별 수급 이동 현황</span>
+            <span class="text-[10px] text-emerald-400 font-mono">SECTOR ROTATION</span>
+          </div>
+          <div id="sectorFlowList" class="space-y-2 text-xs">
+            <!-- Populated dynamically via JS -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // =========================================================================
+    // INNO 리볼버 퀀트 시스템 - Real-Time Multi-Factor Quant Engine
+    // =========================================================================
+    const TICKER_PROFILES = {
+      NVDA: { name: "NVIDIA Corporation", sector: "Semiconductors", basePrice: 142.80, vol: 0.0042, bias: 0.72 },
+      TSLA: { name: "Tesla, Inc.", sector: "EV & Autonomous AI", basePrice: 348.50, vol: 0.0065, bias: 0.58 },
+      AAPL: { name: "Apple Inc.", sector: "Consumer Tech & AI", basePrice: 234.20, vol: 0.0028, bias: 0.64 },
+      MSFT: { name: "Microsoft Corporation", sector: "Cloud & Enterprise AI", basePrice: 428.90, vol: 0.0031, bias: 0.69 },
+      PLTR: { name: "Palantir Technologies", sector: "Defense & Enterprise AI", basePrice: 64.30, vol: 0.0058, bias: 0.75 },
+      TQQQ: { name: "ProShares UltraPro QQQ", sector: "3x Leveraged Nasdaq-100", basePrice: 82.60, vol: 0.0078, bias: 0.66 },
+      SPY:  { name: "SPDR S&P 500 ETF Trust", sector: "US Large Cap Index", basePrice: 594.40, vol: 0.0022, bias: 0.62 }
+    };
+
+    const SECTORS = [
+      { code: "XLK", name: "기술 / 반도체 (XLK)", flow: "+$1.42B", pct: 78, dir: "up" },
+      { code: "XLC", name: "커뮤니케이션 (XLC)", flow: "+$540M", pct: 64, dir: "up" },
+      { code: "XLF", name: "금융 / 은행 (XLF)", flow: "+$390M", pct: 58, dir: "up" },
+      { code: "XLI", name: "산업재 / 방산 (XLI)", flow: "+$285M", pct: 54, dir: "up" },
+      { code: "XLV", name: "헬스케어 (XLV)", flow: "-$210M", pct: 41, dir: "down" },
+      { code: "XLE", name: "에너지 (XLE)", flow: "-$340M", pct: 34, dir: "down" }
+    ];
+
+    const NEWS_POOL = [
+      { dot: "text-emerald-400", text: "연준(Fed) 위원 발언: 근원 인플레이션 둔화 추세 확인, 유동성 환경 우호적" },
+      { dot: "text-amber-400", text: "중동·동유럽 해상 물류 및 공급망 리스크 모니터링 지속 (GPR 실시간 반영)" },
+      { dot: "text-cyan-400", text: "기관 블록트레이드 및 다크풀 수급이 주도주 상단 돌파를 지지" },
+      { dot: "text-emerald-400", text: "미 국채 10년물 입찰 호조 속 성장주 밸류에이션 할인 압력 완화" },
+      { dot: "text-rose-400", text: "옵션 만기일(0DTE/월물) 앞두고 주요 행사가 감마 헤지 플로우 확대" }
+    ];
+
+    let currentTicker = "NVDA";
+    let isStreaming = true;
+    let tickCount = 0;
+
+    // Time-series buffers (last 45 ticks)
+    const MAX_POINTS = 45;
+    let labels = [];
+    let priceSeries = [];
+    let envUpperSeries = [];
+    let envLowerSeries = [];
+    let mddSeries = [];
+    let oscSeries = [];
+    let peakPrice = 142.80;
+
+    // Macro state
+    let macroState = {
+      fng: 64,
+      vix: 15.82,
+      gpr: 118.4,
+      us10y: 4.28,
+      dxy: 104.12
+    };
+
+    function hashTicker(sym) {
+      let h = 0;
+      for (let i = 0; i < sym.length; i++) {
+        h = (h * 31 + sym.charCodeAt(i)) >>> 0;
+      }
+      return h;
+    }
+
+    function getProfile(sym) {
+      const upper = sym.toUpperCase().trim() || "NVDA";
+      if (TICKER_PROFILES[upper]) return { symbol: upper, ...TICKER_PROFILES[upper] };
+      const h = hashTicker(upper);
+      const basePrice = Number((25 + (h % 380) + ((h % 99) / 100)).toFixed(2));
+      const vol = 0.003 + ((h % 45) / 10000);
+      const bias = 0.42 + ((h % 42) / 100);
+      return {
+        symbol: upper,
+        name: `${upper} Equity · Global Quant Feed`,
+        sector: "Global Equities",
+        basePrice,
+        vol,
+        bias
+      };
+    }
+
+    // Chart.js Instances
+    let priceChart, mddChart, oscillatorChart;
+
+    function initCharts() {
+      const commonGrid = { color: "rgba(51, 78, 122, 0.22)" };
+      const commonTick = { color: "#94a3b8", font: { size: 10 } };
+
+      const srPlugin = {
+        id: "srLinesPlugin",
+        afterDatasetsDraw(chart) {
+          const meta = chart.options.plugins?.srLines;
+          if (!meta) return;
+          const { ctx, chartArea: { left, right }, scales: { y } } = chart;
+          const drawLevel = (val, color, label) => {
+            if (typeof val !== "number") return;
+            const yPos = y.getPixelForValue(val);
+            if (yPos < chart.chartArea.top || yPos > chart.chartArea.bottom) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([5, 4]);
+            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = color;
+            ctx.moveTo(left, yPos);
+            ctx.lineTo(right, yPos);
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.font = "bold 10px monospace";
+            ctx.fillText(`${label} $${val.toFixed(2)}`, left + 6, yPos - 4);
+            ctx.restore();
+          };
+          drawLevel(meta.r1, "rgba(244, 63, 94, 0.85)", "R1");
+          drawLevel(meta.s1, "rgba(16, 185, 129, 0.85)", "S1");
+        }
+      };
+
+      priceChart = new Chart(document.getElementById("priceChart"), {
+        type: "line",
+        plugins: [srPlugin],
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "현재가",
+              data: priceSeries,
+              borderColor: "#00e5ff",
+              backgroundColor: "rgba(0, 229, 255, 0.12)",
+              borderWidth: 2.2,
+              pointRadius: 0,
+              tension: 0.25,
+              fill: true
+            },
+            {
+              label: "Envelope 상단",
+              data: envUpperSeries,
+              borderColor: "rgba(245, 158, 11, 0.45)",
+              borderWidth: 1,
+              borderDash: [2, 2],
+              pointRadius: 0,
+              tension: 0.25
+            },
+            {
+              label: "Envelope 하단",
+              data: envLowerSeries,
+              borderColor: "rgba(168, 85, 247, 0.45)",
+              borderWidth: 1,
+              borderDash: [2, 2],
+              pointRadius: 0,
+              tension: 0.25
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false },
+            srLines: { r1: null, s1: null }
+          },
+          scales: {
+            x: { display: false },
+            y: { grid: commonGrid, ticks: commonTick }
+          }
+        }
+      });
+
+      mddChart = new Chart(document.getElementById("mddChart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "MDD (%)",
+              data: mddSeries,
+              borderColor: "#f59e0b",
+              backgroundColor: "rgba(245, 158, 11, 0.22)",
+              borderWidth: 1.8,
+              pointRadius: 0,
+              tension: 0.2,
+              fill: true
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false },
+            y: {
+              max: 0,
+              grid: commonGrid,
+              ticks: {
+                ...commonTick,
+                callback: (v) => `${v}%`
+              }
+            }
+          }
+        }
+      });
+
+      oscillatorChart = new Chart(document.getElementById("oscillatorChart"), {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "퀀트 시그널 오실레이터",
+              data: oscSeries,
+              borderColor: "#10b981",
+              backgroundColor: "rgba(16, 185, 129, 0.14)",
+              borderWidth: 2,
+              pointRadius: 0,
+              tension: 0.3,
+              fill: "origin"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { display: false },
+            y: {
+              min: -100,
+              max: 100,
+              grid: commonGrid,
+              ticks: {
+                ...commonTick,
+                stepSize: 50
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function resetSeriesForTicker(profile) {
+      labels = [];
+      priceSeries = [];
+      envUpperSeries = [];
+      envLowerSeries = [];
+      mddSeries = [];
+      oscSeries = [];
+
+      let p = profile.basePrice * (0.97 + Math.random() * 0.03);
+      peakPrice = p;
+
+      for (let i = 0; i < MAX_POINTS; i++) {
+        const drift = (profile.bias - 0.48) * profile.vol * 0.6;
+        const shock = (Math.random() - 0.48) * profile.vol * p;
+        p = Math.max(1, p * (1 + drift) + shock);
+        if (p > peakPrice) peakPrice = p;
+        const dd = Number((((p - peakPrice) / peakPrice) * 100).toFixed(2));
+        const envU = Number((p * 1.025).toFixed(2));
+        const envL = Number((p * 0.975).toFixed(2));
+        const oscVal = Number(((profile.bias - 0.5) * 140 + (Math.random() - 0.5) * 28).toFixed(1));
+
+        labels.push(`T-${MAX_POINTS - i}`);
+        priceSeries.push(Number(p.toFixed(2)));
+        envUpperSeries.push(envU);
+        envLowerSeries.push(envL);
+        mddSeries.push(dd);
+        oscSeries.push(Math.max(-100, Math.min(100, oscVal)));
+      }
+    }
+
+    function updateDashboardTick() {
+      const profile = getProfile(currentTicker);
+      tickCount++;
+
+      // 1. Update Macro Bar (Condition 8)
+      macroState.fng = Math.max(5, Math.min(95, Math.round(macroState.fng + (Math.random() - 0.49) * 2)));
+      macroState.vix = Number(Math.max(10.5, Math.min(45.0, macroState.vix + (Math.random() - 0.5) * 0.25)).toFixed(2));
+      macroState.gpr = Number(Math.max(70.0, Math.min(220.0, macroState.gpr + (Math.random() - 0.5) * 1.4)).toFixed(1));
+      macroState.us10y = Number(Math.max(3.2, Math.min(5.2, macroState.us10y + (Math.random() - 0.5) * 0.02)).toFixed(2));
+      macroState.dxy = Number(Math.max(96.0, Math.min(112.0, macroState.dxy + (Math.random() - 0.5) * 0.08)).toFixed(2));
+
+      document.getElementById("fngValue").textContent = macroState.fng;
+      const fngLabelEl = document.getElementById("fngLabel");
+      if (macroState.fng >= 60) {
+        fngLabelEl.textContent = "Greed";
+        fngLabelEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold";
+      } else if (macroState.fng <= 40) {
+        fngLabelEl.textContent = "Fear";
+        fngLabelEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 font-bold";
+      } else {
+        fngLabelEl.textContent = "Neutral";
+        fngLabelEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold";
+      }
+
+      document.getElementById("vixValue").textContent = macroState.vix.toFixed(2);
+      document.getElementById("gprValue").textContent = macroState.gpr.toFixed(1);
+      const gprStatusEl = document.getElementById("gprStatus");
+      if (macroState.gpr > 140) {
+        gprStatusEl.textContent = "고위험";
+        gprStatusEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold";
+      } else if (macroState.gpr > 110) {
+        gprStatusEl.textContent = "경계";
+        gprStatusEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-bold";
+      } else {
+        gprStatusEl.textContent = "안정";
+        gprStatusEl.className = "text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-bold";
+      }
+
+      // 2. Update Price & MDD Series (Condition 1 & 7)
+      const prevPrice = priceSeries[priceSeries.length - 1] || profile.basePrice;
+      const drift = (profile.bias - 0.48) * profile.vol * 0.8;
+      const deltaPct = drift + (Math.random() - 0.48) * profile.vol * 1.4;
+      const nextPrice = Number(Math.max(1, prevPrice * (1 + deltaPct)).toFixed(2));
+      if (nextPrice > peakPrice) peakPrice = nextPrice;
+
+      const currentMdd = Number((((nextPrice - peakPrice) / peakPrice) * 100).toFixed(2));
+      const sessionPct = Number((((nextPrice - profile.basePrice) / profile.basePrice) * 100).toFixed(2));
+      const sessionDiff = Number((nextPrice - profile.basePrice).toFixed(2));
+
+      priceSeries.push(nextPrice);
+      envUpperSeries.push(Number((nextPrice * 1.025).toFixed(2)));
+      envLowerSeries.push(Number((nextPrice * 0.975).toFixed(2)));
+      mddSeries.push(currentMdd);
+      labels.push(new Date().toLocaleTimeString("ko-KR", { hour12: false }));
+
+      if (priceSeries.length > MAX_POINTS) {
+        priceSeries.shift();
+        envUpperSeries.shift();
+        envLowerSeries.shift();
+        mddSeries.shift();
+        labels.shift();
+      }
+
+      // Support & Resistance (Condition 7)
+      const r1 = Number((nextPrice * 1.026).toFixed(2));
+      const r2 = Number((nextPrice * 1.058).toFixed(2));
+      const s1 = Number((nextPrice * 0.974).toFixed(2));
+      const s2 = Number((nextPrice * 0.942).toFixed(2));
+
+      document.getElementById("activeTickerBadge").textContent = profile.symbol;
+      document.getElementById("activeSectorBadge").textContent = profile.sector;
+      document.getElementById("activeNameText").textContent = `${profile.name} · Quant Stream`;
+      document.getElementById("livePriceText").textContent = `$${nextPrice.toFixed(2)}`;
+
+      const changeEl = document.getElementById("liveChangeText");
+      const sign = sessionDiff >= 0 ? "+" : "";
+      changeEl.textContent = `${sign}$${sessionDiff.toFixed(2)} (${sign}${sessionPct.toFixed(2)}%)`;
+      changeEl.className = `text-xs font-bold font-mono ${sessionDiff >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+
+      document.getElementById("resistanceText").textContent = `$${r1.toFixed(2)} / $${r2.toFixed(2)}`;
+      document.getElementById("resistDistText").textContent = `상방 여력 +${(((r1 - nextPrice) / nextPrice) * 100).toFixed(2)}%`;
+      document.getElementById("supportText").textContent = `$${s1.toFixed(2)} / $${s2.toFixed(2)}`;
+      document.getElementById("supportDistText").textContent = `하방 완충 ${(((s1 - nextPrice) / nextPrice) * 100).toFixed(2)}%`;
+
+      const minMdd = Math.min(...mddSeries).toFixed(2);
+      document.getElementById("mddCurrentText").textContent = `${currentMdd.toFixed(2)}%`;
+      document.getElementById("mddPeakText").textContent = `구간 최저 MDD: ${minMdd}%`;
+
+      priceChart.options.plugins.srLines = { r1, s1 };
+      priceChart.update();
+      mddChart.update();
+
+      // 3. Technical Indicators & Slow %K (5,3,3) (12,5,5) (20,12,12)
+      const h = hashTicker(profile.symbol);
+      const wave = Math.sin(tickCount * 0.25 + (h % 10));
+      const rsi = Number(Math.max(22, Math.min(84, 55 + profile.bias * 20 + wave * 9 + (Math.random() - 0.5) * 4)).toFixed(1));
+      const mfi = Number(Math.max(20, Math.min(88, 58 + profile.bias * 18 + wave * 8 + (Math.random() - 0.5) * 5)).toFixed(1));
+      const macd = Number(((profile.bias - 0.45) * 4.5 + wave * 1.1 + (Math.random() - 0.5) * 0.3).toFixed(2));
+      const obvM = Number(((profile.bias - 0.42) * 9.5 + wave * 2.2 + (Math.random() - 0.5) * 0.8).toFixed(1));
+
+      const sk1 = Number(Math.max(10, Math.min(95, 62 + profile.bias * 22 + wave * 14 + (Math.random() - 0.5) * 6)).toFixed(1));
+      const sk2 = Number(Math.max(12, Math.min(92, 60 + profile.bias * 20 + wave * 10 + (Math.random() - 0.5) * 4)).toFixed(1));
+      const sk3 = Number(Math.max(15, Math.min(90, 58 + profile.bias * 18 + wave * 7 + (Math.random() - 0.5) * 3)).toFixed(1));
+
+      const mom = Number(((profile.bias - 0.46) * 11 + wave * 2.5 + (Math.random() - 0.5) * 0.9).toFixed(2));
+      const envDev = Number((((nextPrice - (nextPrice * 0.995)) / nextPrice) * 100 + wave * 0.8).toFixed(2));
+      const vr = Math.round(110 + profile.bias * 85 + Math.abs(wave) * 45 + Math.random() * 25);
+
+      document.getElementById("indMacd").textContent = `${macd >= 0 ? "+" : ""}${macd}`;
+      document.getElementById("indMacd").className = `text-xs font-extrabold font-mono mt-1 ${macd >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+      document.getElementById("indMacdSig").textContent = macd >= 0 ? "골든크로스" : "데드크로스";
+
+      document.getElementById("indRsi").textContent = rsi;
+      document.getElementById("indRsiSig").textContent = rsi > 70 ? "과열주의" : rsi < 30 ? "과매도반등" : "상승추세";
+
+      document.getElementById("indMfi").textContent = mfi;
+      document.getElementById("indMfiSig").textContent = mfi >= 55 ? "자금유입" : "자금이탈";
+
+      document.getElementById("indObv").textContent = `${obvM >= 0 ? "+" : ""}${obvM}M`;
+      document.getElementById("indObv").className = `text-xs font-extrabold font-mono mt-1 ${obvM >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+      document.getElementById("indObvSig").textContent = obvM >= 0 ? "고점돌파" : "매물소화";
+
+      document.getElementById("indSk1").textContent = sk1;
+      document.getElementById("indSk1Sig").textContent = sk1 >= 50 ? "단기매수" : "단기조정";
+      document.getElementById("indSk2").textContent = sk2;
+      document.getElementById("indSk2Sig").textContent = sk2 >= 50 ? "중기상승" : "중기약세";
+      document.getElementById("indSk3").textContent = sk3;
+      document.getElementById("indSk3Sig").textContent = sk3 >= 50 ? "장기추세" : "장기하락";
+
+      document.getElementById("indMom").textContent = `${mom >= 0 ? "+" : ""}${mom}%`;
+      document.getElementById("indMom").className = `text-xs font-extrabold font-mono mt-1 ${mom >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+      document.getElementById("indMomSig").textContent = mom >= 0 ? "가속구간" : "감속구간";
+
+      document.getElementById("indEnv").textContent = `${envDev >= 0 ? "+" : ""}${envDev}%`;
+      document.getElementById("indEnvSig").textContent = envDev >= 1.5 ? "밴드상단접근" : "밴드중앙회귀";
+
+      document.getElementById("indVr").textContent = `${vr}%`;
+      document.getElementById("indVrSig").textContent = vr >= 150 ? "거래활발" : "거래평온";
+
+      // 4. Options, Short Interest & Risk (Condition 4)
+      const pcr = Number(Math.max(0.38, Math.min(1.45, 1.12 - profile.bias * 0.65 + (Math.random() - 0.5) * 0.08)).toFixed(2));
+      const shortPct = Number((2.2 + ((h % 90) / 10) + (Math.random() - 0.5) * 0.3).toFixed(1));
+      const coverDays = Number((shortPct / 3.1 + 0.6).toFixed(1));
+      const var95 = Number((-(profile.vol * 420 + (macroState.vix - 14) * 0.08)).toFixed(2));
+      const gexVal = Number(((profile.bias - 0.45) * 2.8 + wave * 0.35).toFixed(2));
+
+      document.getElementById("pcrValue").textContent = pcr.toFixed(2);
+      const pcrDomEl = document.getElementById("pcrDominance");
+      if (pcr < 0.85) {
+        pcrDomEl.textContent = "콜 옵션 우위 (강세)";
+        pcrDomEl.className = "text-[10px] font-bold text-emerald-400";
+      } else if (pcr > 1.05) {
+        pcrDomEl.textContent = "풋 옵션 우위 (방어/하락)";
+        pcrDomEl.className = "text-[10px] font-bold text-rose-400";
+      } else {
+        pcrDomEl.textContent = "풋/콜 균형 구간";
+        pcrDomEl.className = "text-[10px] font-bold text-amber-300";
+      }
+
+      document.getElementById("shortInterestText").innerHTML = `${shortPct}% <span class="text-xs text-slate-400">(${coverDays}d)</span>`;
+      document.getElementById("shortSqueezeText").textContent = shortPct > 8.0 ? "숏스퀴즈 압력: 높음" : "숏스퀴즈 압력: 낮음";
+      document.getElementById("var95Text").textContent = `${var95}%`;
+      document.getElementById("gexText").textContent = `${gexVal >= 0 ? "+" : ""}$${gexVal}B (${gexVal >= 0 ? "양의감마" : "음의감마"})`;
+
+      const riskBadge = document.getElementById("riskLevelBadge");
+      if (Math.abs(var95) > 3.6 || macroState.vix > 24 || currentMdd < -6) {
+        riskBadge.textContent = "위험도: 높음 (HIGH)";
+        riskBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-400/40";
+      } else if (Math.abs(var95) < 2.2 && macroState.vix < 18) {
+        riskBadge.textContent = "위험도: 낮음 (LOW)";
+        riskBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40";
+      } else {
+        riskBadge.textContent = "위험도: 보통 (MODERATE)";
+        riskBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-400/40";
+      }
+
+      // 5. Global SNS Investor Sentiment Index (Condition 6: 1~100)
+      const snsScore = Math.max(5, Math.min(99, Math.round(45 + profile.bias * 38 + wave * 10 + (Math.random() - 0.5) * 6)));
+      const snsX = Math.max(1, Math.min(100, snsScore + Math.round((Math.random() - 0.45) * 6)));
+      const snsReddit = Math.max(1, Math.min(100, snsScore + Math.round((Math.random() - 0.5) * 8)));
+      const snsSt = Math.max(1, Math.min(100, snsScore + Math.round((Math.random() - 0.5) * 5)));
+
+      document.getElementById("snsScoreValue").textContent = snsScore;
+      document.getElementById("snsScoreBar").style.width = `${snsScore}%`;
+      document.getElementById("snsXVal").textContent = snsX;
+      document.getElementById("snsRedditVal").textContent = snsReddit;
+      document.getElementById("snsStVal").textContent = snsSt;
+      document.getElementById("snsSentimentLabel").textContent =
+        snsScore >= 65 ? "X · Reddit · StockTwits 낙관 우세" :
+        snsScore <= 38 ? "소셜 커뮤니티 경계·공포 심리 우세" :
+        "소셜 멘션 중립·관망 국면";
+
+      // 6. Dark Pool, Institutional & Smart Money + Macro News
+      const dpShare = Number((32 + ((h % 140) / 10) + (Math.random() - 0.5) * 1.5).toFixed(1));
+      const dpFlow = Number(((profile.bias - 0.45) * 420 + wave * 75).toFixed(0));
+      const instFlow = Number(((profile.bias - 0.44) * 780 + wave * 120).toFixed(1));
+      const smLong = Math.max(25, Math.min(92, Math.round(45 + profile.bias * 35 + wave * 8)));
+
+      document.getElementById("darkPoolVol").innerHTML = `${dpShare}% <span class="text-[11px] text-slate-400">비중</span>`;
+      document.getElementById("darkPoolBias").textContent = `${dpFlow >= 0 ? "블록 매수 우위" : "블록 매도 우위"} (${dpFlow >= 0 ? "+" : ""}$${dpFlow}M)`;
+      document.getElementById("darkPoolBias").className = `text-[11px] font-semibold mt-1 ${dpFlow >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+
+      document.getElementById("instFlowVal").textContent = `${instFlow >= 0 ? "+" : ""}$${instFlow}M`;
+      document.getElementById("instFlowVal").className = `text-base font-black font-mono mt-1 ${instFlow >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+      document.getElementById("smartMoneyPos").textContent = `NET LONG ${smLong}%`;
+
+      document.getElementById("macroUs10y").textContent = `${macroState.us10y.toFixed(2)}%`;
+      document.getElementById("macroDxy").textContent = `${macroState.dxy.toFixed(2)}`;
+      document.getElementById("macroGeoImpact").textContent =
+        macroState.gpr > 135 ? "하방 압력 주의 (-9pt)" : "중립~제한적 (-3pt)";
+
+      if (tickCount % 4 === 1) {
+        const newsEl = document.getElementById("macroNewsList");
+        const rotated = [...NEWS_POOL.slice(tickCount % NEWS_POOL.length), ...NEWS_POOL.slice(0, tickCount % NEWS_POOL.length)].slice(0, 3);
+        newsEl.innerHTML = rotated.map((n) => `
+          <li class="flex items-start gap-1.5">
+            <span class="${n.dot} font-bold">●</span>
+            <span>${n.text}</span>
+          </li>
+        `).join("");
+      }
+
+      // 7. Oscillator & INNO Quant Composite Score (1~100) (Conditions 2 & 3)
+      const techScore = Math.max(10, Math.min(99, Math.round((rsi * 0.25) + (mfi * 0.25) + ((sk1 + sk2 + sk3) / 3) * 0.3 + (macd >= 0 ? 16 : 6))));
+      const flowScore = Math.max(10, Math.min(99, Math.round(smLong * 0.5 + (pcr < 0.9 ? 22 : 8) + (dpFlow >= 0 ? 18 : 6))));
+      const macroScore = Math.max(10, Math.min(99, Math.round(macroState.fng * 0.55 + (macroState.vix < 20 ? 22 : 8) + (macroState.gpr < 135 ? 14 : 4))));
+      const quantScore = Math.max(1, Math.min(100, Math.round(techScore * 0.35 + flowScore * 0.40 + macroScore * 0.25)));
+
+      const oscVal = Number(Math.max(-100, Math.min(100, (quantScore - 50) * 2.1 + wave * 9)).toFixed(1));
+      oscSeries.push(oscVal);
+      if (oscSeries.length > MAX_POINTS) oscSeries.shift();
+
+      const oscColor = oscVal >= 0 ? "#10b981" : "#f43f5e";
+      oscillatorChart.data.datasets[0].borderColor = oscColor;
+      oscillatorChart.data.datasets[0].backgroundColor = oscVal >= 0 ? "rgba(16, 185, 129, 0.16)" : "rgba(244, 63, 94, 0.16)";
+      oscillatorChart.update();
+
+      const oscValEl = document.getElementById("oscCurrentVal");
+      oscValEl.textContent = `${oscVal >= 0 ? "+" : ""}${oscVal.toFixed(1)}`;
+      oscValEl.className = `font-mono font-bold ${oscVal >= 0 ? "text-emerald-400" : "text-rose-400"}`;
+
+      const actionBadge = document.getElementById("signalActionBadge");
+      if (oscVal >= 35) {
+        actionBadge.textContent = `BUY SIGNAL (${oscVal >= 0 ? "+" : ""}${oscVal.toFixed(0)})`;
+        actionBadge.className = "px-2.5 py-0.5 rounded-md text-xs font-black bg-emerald-500 text-slate-950";
+      } else if (oscVal <= -35) {
+        actionBadge.textContent = `SELL SIGNAL (${oscVal.toFixed(0)})`;
+        actionBadge.className = "px-2.5 py-0.5 rounded-md text-xs font-black bg-rose-500 text-white";
+      } else {
+        actionBadge.textContent = `NEUTRAL / HOLD (${oscVal >= 0 ? "+" : ""}${oscVal.toFixed(0)})`;
+        actionBadge.className = "px-2.5 py-0.5 rounded-md text-xs font-black bg-amber-400 text-slate-950";
+      }
+
+      const buyPct = Math.max(10, Math.min(90, Math.round((oscVal + 100) / 2)));
+      document.getElementById("buyPressurePct").textContent = `${buyPct}%`;
+      document.getElementById("sellPressurePct").textContent = `${100 - buyPct}%`;
+
+      document.getElementById("quantScoreValue").textContent = quantScore;
+      document.getElementById("quantScoreBar").style.width = `${quantScore}%`;
+      document.getElementById("subTechScore").textContent = techScore;
+      document.getElementById("subFlowScore").textContent = flowScore;
+      document.getElementById("subMacroScore").textContent = macroScore;
+
+      const gradeBadge = document.getElementById("quantGradeBadge");
+      if (quantScore >= 75) {
+        gradeBadge.textContent = "STRONG BUY · TIER 1";
+        gradeBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-400/40";
+      } else if (quantScore >= 55) {
+        gradeBadge.textContent = "ACCUMULATE · TIER 2";
+        gradeBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-cyan-500/20 text-cyan-300 border border-cyan-400/40";
+      } else if (quantScore >= 40) {
+        gradeBadge.textContent = "NEUTRAL · WATCH";
+        gradeBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-amber-500/20 text-amber-300 border border-amber-400/40";
+      } else {
+        gradeBadge.textContent = "DEFENSIVE / SELL";
+        gradeBadge.className = "px-2 py-0.5 rounded text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-400/40";
+      }
+
+      // 8. Sector Flow Matrix
+      const sectorContainer = document.getElementById("sectorFlowList");
+      sectorContainer.innerHTML = SECTORS.map((s) => {
+        const jitter = Math.round((Math.random() - 0.5) * 4);
+        const pct = Math.max(15, Math.min(95, s.pct + jitter));
+        const isUp = s.dir === "up";
+        return `
+          <div class="sub-card px-3 py-2">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-slate-200">${s.name}</span>
+              <span class="font-mono font-bold ${isUp ? "text-emerald-400" : "text-rose-400"}">${s.flow}</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div class="h-full ${isUp ? "bg-emerald-400" : "bg-rose-500"}" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function selectTicker(sym) {
+      const cleaned = (sym || "").toUpperCase().trim();
+      if (!cleaned) return;
+      currentTicker = cleaned;
+      document.getElementById("tickerInput").value = cleaned;
+      const profile = getProfile(cleaned);
+      resetSeriesForTicker(profile);
+      updateDashboardTick();
+    }
+
+    // Event Listeners
+    document.getElementById("tickerForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      selectTicker(document.getElementById("tickerInput").value);
+    });
+
+    document.querySelectorAll(".quick-btn").forEach((btn) => {
+      btn.addEventListener("click", () => selectTicker(btn.dataset.quick));
+    });
+
+    document.getElementById("toggleStreamBtn").addEventListener("click", (e) => {
+      isStreaming = !isStreaming;
+      e.target.textContent = isStreaming ? "일시정지" : "스트림 재개";
+      document.getElementById("streamStatusText").textContent = isStreaming
+        ? "실시간 퀀트 엔진 스트리밍 중 (1.5s)"
+        : "스트리밍 일시정지됨";
+    });
+
+    // Clock & Stream Loop
+    setInterval(() => {
+      document.getElementById("clockDisplay").textContent = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+    }, 1000);
+
+    setInterval(() => {
+      if (isStreaming) updateDashboardTick();
+    }, 1500);
+
+    // Boot
+    initCharts();
+    selectTicker("NVDA");
+  </script>
+</body>
+</html>
