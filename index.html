@@ -755,6 +755,11 @@
           </div>
           <div class="muted" id="vixDetailText" style="text-align:right;">30일 예상 S&amp;P 500 내재변동성</div>
         </div>
+        <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
+          <input id="manualVixInput" class="text-input" type="number" step="0.01" min="5" max="120" placeholder="직접 입력 (예: 26.36)" style="flex:1; padding:6px 9px; font-size:12px;" />
+          <button id="btnApplyVix" class="btn-chip primary" type="button" style="padding:6px 10px;">고정</button>
+          <button id="btnResetVix" class="btn-chip" type="button" style="padding:6px 9px;">자동</button>
+        </div>
       </div>
 
       <!-- 8B. Individual Fear & Greed Index Card -->
@@ -772,6 +777,11 @@
         </div>
         <div class="meter-track" style="margin-top:8px;">
           <div class="meter-fill" id="fgMeterBar" style="width:25%; background:#ef4444;"></div>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px; align-items:center;">
+          <input id="manualFgInput" class="text-input" type="number" step="1" min="1" max="100" placeholder="직접 입력 (1~100, 예: 17)" style="flex:1; padding:6px 9px; font-size:12px;" />
+          <button id="btnApplyFg" class="btn-chip primary" type="button" style="padding:6px 10px;">고정</button>
+          <button id="btnResetFg" class="btn-chip" type="button" style="padding:6px 9px;">자동</button>
         </div>
       </div>
 
@@ -982,10 +992,13 @@
       dayLow: 0,
       sourceLabel: "초기화 중",
       isLive: false,
-      vix: 24.5,
+      vix: 26.36,
       vixLive: false,
-      fearGreed: 24,
+      vixSourceText: "초기 기준값",
+      vixManual: null,
+      fearGreed: 17,
       fgLive: false,
+      fgManual: null,
       fgRatingText: "",
       geoRisk: 118
     };
@@ -1241,8 +1254,9 @@
             if (!r.ok) throw new Error("fg http");
             let data = JSON.parse(await r.text());
             if (typeof data?.contents === "string") data = JSON.parse(data.contents);
-            const score = Number(data?.fear_and_greed?.score);
-            if (!Number.isFinite(score) || score < 0 || score > 100) {
+            const rawScore = data?.fear_and_greed?.score ?? data?.fear_and_greed_historical?.data?.slice(-1)?.[0]?.y;
+            const score = Number(rawScore);
+            if (!Number.isFinite(score) || score < 2 || score > 99) {
               throw new Error("fg invalid score");
             }
             return {
@@ -1257,7 +1271,32 @@
       }
     }
 
-    async function fetchVixLive() {
+    async function fetchVixFromTwelve(apiKey) {
+      if (!apiKey) return null;
+      const candidates = ["VIX", "^VIX", "SPX:CBOE"];
+      for (const sym of candidates) {
+        try {
+          const url = `https://api.twelvedata.com/price?symbol=${encodeURIComponent(sym)}&apikey=${encodeURIComponent(apiKey)}`;
+          const r = await fetchWithTimeout(url, { cache: "no-store" }, 3500);
+          if (!r.ok) continue;
+          const j = await r.json();
+          const p = Number(j?.price);
+          if (sym !== "SPX:CBOE" && Number.isFinite(p) && p >= 8 && p <= 95) {
+            return { value: Number(p.toFixed(2)), source: "Twelve Data ^VIX" };
+          }
+        } catch (e) {
+          // try next candidate
+        }
+      }
+      return null;
+    }
+
+    async function fetchVixLive(twelveKey = "") {
+      if (twelveKey) {
+        const tdRes = await fetchVixFromTwelve(twelveKey);
+        if (tdRes) return tdRes;
+      }
+
       const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX?range=5d&interval=1d&_=${Date.now()}`;
       const urls = [
         yUrl,
@@ -1289,7 +1328,7 @@
             return Number(val.toFixed(2));
           })
         );
-        return vixVal;
+        return { value: vixVal, source: "Yahoo ^VIX" };
       } catch (e) {
         return null;
       }
@@ -1375,9 +1414,12 @@
       const shortRiskScore = Math.min(100, Math.max(10, Math.round(prof.shortPct * 5.2 + Math.max(0, state.vix - 18) * 1.4)));
       const shortRiskLabel = shortRiskScore >= 70 ? "높음 (스퀴즈·변동성 주의)" : (shortRiskScore >= 42 ? "보통" : "낮음");
 
-      // Geopolitical Risk & Fear & Greed
+      // Geopolitical Risk & Fear & Greed (calibrated so VIX 20~32 maps realistically into ~12~50 instead of clamping at 1)
       const geoRisk = Number((105 + Math.max(0, state.vix - 15) * 1.35 + (pcRatio - 0.9) * 18).toFixed(1));
-      const fearGreed = Math.max(1, Math.min(99, Math.round(100 - state.vix * 2.45 + macdDiff * 1.8)));
+      const vixComponent = Math.max(0, Math.min(35, (38 - state.vix) * 1.45));
+      const momComponent = Math.max(-10, Math.min(14, macdDiff * 1.6 + (rsi - 50) * 0.18));
+      const optComponent = Math.max(-8, Math.min(8, (0.95 - pcRatio) * 10));
+      const fearGreed = Math.max(8, Math.min(90, Math.round(12 + vixComponent * 0.55 + momComponent + optComponent)));
 
       // Global SNS Sentiment (1~100)
       const snsScore = Math.max(1, Math.min(100, Math.round(prof.snsBase + macdDiff * 2.2 - (pcRatio - 0.95) * 18)));
@@ -1598,16 +1640,20 @@
       if (appState.vix >= 25) { vixEl.className = "macro-val neg"; vixLblEl.textContent = "고변동성 주의 (≥25)"; vixLblEl.className = "macro-tag neg"; }
       else if (appState.vix >= 18) { vixEl.className = "macro-val warn-txt"; vixLblEl.textContent = "경계 수준 (18~25)"; vixLblEl.className = "macro-tag warn-txt"; }
       else { vixEl.className = "macro-val pos"; vixLblEl.textContent = "안정 구간 (<18)"; vixLblEl.className = "macro-tag pos"; }
+      const isVixManual = typeof appState.vixManual === "number" && Number.isFinite(appState.vixManual);
       if (vixPill) {
-        vixPill.textContent = appState.vixLive ? "^VIX 실시간" : "^VIX 모델";
-        vixPill.className = `pill ${appState.vixLive ? "live" : "warn"}`;
+        vixPill.textContent = isVixManual ? "^VIX 수동고정" : (appState.vixLive ? appState.vixSourceText : "^VIX 보정");
+        vixPill.className = `pill ${isVixManual ? "danger" : (appState.vixLive ? "live" : "warn")}`;
       }
       if (vixDetail) {
-        vixDetail.textContent = appState.vixLive ? "CBOE ^VIX 시세 반영" : "실시간 조회 대기·보정값";
+        vixDetail.textContent = isVixManual
+          ? "사용자 직접 입력값 고정 중"
+          : (appState.vixLive ? `${appState.vixSourceText} 시세 반영` : "Twelve Data/Yahoo 조회 대기·보정값");
       }
 
       // 8B. Individual Fear & Greed Display
-      const fgDisplayScore = appState.fgLive ? appState.fearGreed : q.fearGreed;
+      const isFgManual = typeof appState.fgManual === "number" && Number.isFinite(appState.fgManual);
+      const fgDisplayScore = isFgManual ? appState.fgManual : (appState.fgLive ? appState.fearGreed : q.fearGreed);
       const fgEl = document.getElementById("fgValue");
       const fgLblEl = document.getElementById("fgLabel");
       const fgPill = document.getElementById("fgSourcePill");
@@ -1642,13 +1688,15 @@
         fgBar.style.background = fgColor;
       }
       if (fgPill) {
-        fgPill.textContent = appState.fgLive ? "F&G 실시간" : "F&G 개별 산출";
-        fgPill.className = `pill ${appState.fgLive ? "live" : "warn"}`;
+        fgPill.textContent = isFgManual ? "F&G 수동고정" : (appState.fgLive ? "F&G 실시간" : "F&G 개별 산출");
+        fgPill.className = `pill ${isFgManual ? "danger" : (appState.fgLive ? "live" : "warn")}`;
       }
       if (fgDetail) {
-        fgDetail.textContent = appState.fgLive
-          ? `심리 피드 연동 (${appState.fgRatingText || "실시간"})`
-          : "모멘텀·옵션·VIX 독립 산출";
+        fgDetail.textContent = isFgManual
+          ? "사용자 직접 입력값 고정 중"
+          : (appState.fgLive
+            ? `심리 피드 연동 (${appState.fgRatingText || "실시간"})`
+            : "모멘텀·옵션·VIX 독립 산출");
       }
 
       const geoEl = document.getElementById("geoValue");
@@ -1753,8 +1801,8 @@
       document.querySelectorAll(".tf-btn").forEach((b) => b.classList.toggle("active", b.dataset.tf === tf));
       document.getElementById("headerSub").textContent = `${symbol} · ${tf} · 실시간 퀀트 & MDD`;
 
-      // Fetch VIX and Fear & Greed independently in parallel
-      const vixPromise = fetchVixLive();
+      // Fetch VIX (Twelve Data -> Yahoo fallback) and Fear & Greed independently in parallel
+      const vixPromise = fetchVixLive(appState.keys.twelveKey);
       const fgPromise = fetchFearGreedLive();
 
       let marketData = null;
@@ -1775,14 +1823,23 @@
       }
 
       const [liveVix, liveFg] = await Promise.all([vixPromise, fgPromise]);
-      if (typeof liveVix === "number" && Number.isFinite(liveVix)) {
-        appState.vix = liveVix;
+      if (typeof appState.vixManual === "number" && Number.isFinite(appState.vixManual)) {
+        appState.vix = appState.vixManual;
+        appState.vixLive = false;
+        appState.vixSourceText = "수동 고정";
+      } else if (liveVix && typeof liveVix.value === "number" && Number.isFinite(liveVix.value)) {
+        appState.vix = liveVix.value;
         appState.vixLive = true;
+        appState.vixSourceText = liveVix.source || "^VIX 실시간";
       } else {
         appState.vixLive = false;
+        appState.vixSourceText = "보정 기준값";
       }
 
-      if (liveFg && typeof liveFg.score === "number" && Number.isFinite(liveFg.score)) {
+      if (typeof appState.fgManual === "number" && Number.isFinite(appState.fgManual)) {
+        appState.fearGreed = appState.fgManual;
+        appState.fgLive = false;
+      } else if (liveFg && typeof liveFg.score === "number" && Number.isFinite(liveFg.score)) {
         appState.fearGreed = liveFg.score;
         appState.fgRatingText = liveFg.rating || "";
         appState.fgLive = true;
@@ -1872,6 +1929,46 @@
         document.getElementById("inpFinnhubKey").value = "";
         saveKeys();
         showToast("API 키가 초기화되었습니다.");
+      });
+
+      document.getElementById("btnApplyVix").addEventListener("click", () => {
+        const val = Number(document.getElementById("manualVixInput").value);
+        if (!Number.isFinite(val) || val < 5 || val > 120) {
+          showToast("VIX는 5~120 사이 숫자로 입력해 주세요.");
+          return;
+        }
+        appState.vixManual = Number(val.toFixed(2));
+        appState.vix = appState.vixManual;
+        appState.vixLive = false;
+        renderDashboard();
+        showToast(`VIX ${appState.vix.toFixed(2)} 수동 고정`);
+      });
+
+      document.getElementById("btnResetVix").addEventListener("click", () => {
+        appState.vixManual = null;
+        document.getElementById("manualVixInput").value = "";
+        loadTickerData(appState.symbol, appState.timeframe);
+        showToast("VIX 자동 조회로 복귀");
+      });
+
+      document.getElementById("btnApplyFg").addEventListener("click", () => {
+        const val = Number(document.getElementById("manualFgInput").value);
+        if (!Number.isFinite(val) || val < 1 || val > 100) {
+          showToast("공포·탐욕 지수는 1~100 사이 숫자로 입력해 주세요.");
+          return;
+        }
+        appState.fgManual = Math.round(val);
+        appState.fearGreed = appState.fgManual;
+        appState.fgLive = false;
+        renderDashboard();
+        showToast(`공포·탐욕 지수 ${appState.fearGreed} 수동 고정`);
+      });
+
+      document.getElementById("btnResetFg").addEventListener("click", () => {
+        appState.fgManual = null;
+        document.getElementById("manualFgInput").value = "";
+        loadTickerData(appState.symbol, appState.timeframe);
+        showToast("공포·탐욕 지수 자동 조회로 복귀");
       });
 
       window.addEventListener("resize", () => {
