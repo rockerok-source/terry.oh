@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="INNO 리볼버" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="theme-color" content="#060913" />
+  <title>INNO 리볼버 퀀트 시스템</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='38' fill='%23090f1d'/%3E%3Ccircle cx='90' cy='90' r='54' fill='none' stroke='%233b82f6' stroke-width='8'/%3E%3Ccircle cx='90' cy='46' r='8' fill='%2334d399'/%3E%3Ccircle cx='128' cy='68' r='8' fill='%2360a5fa'/%3E%3Ccircle cx='128' cy='112' r='8' fill='%23f59e0b'/%3E%3Ccircle cx='90' cy='134' r='8' fill='%23f43f5e'/%3E%3Ccircle cx='52' cy='112' r='8' fill='%23a78bfa'/%3E%3Ccircle cx='52' cy='68' r='8' fill='%2338bdf8'/%3E%3Ctext x='90' y='97' text-anchor='middle' fill='%23ffffff' font-size='26' font-family='sans-serif' font-weight='800'%3EINNO%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="app-body">
+  <div id="iosErrorBanner" class="error-banner hidden" role="alert"></div>
+
+  <header class="glass-header">
+    <div class="container-shell header-top">
+      <div class="brand-group">
+        <div class="brand-badge" aria-hidden="true">IR</div>
+        <div>
+          <div class="brand-title-row">
+            <h1 class="brand-title">INNO 리볼버 퀀트 시스템</h1>
+            <span class="live-pill">
+              <span class="live-dot"></span>
+              LIVE
+            </span>
+          </div>
+          <p class="brand-subtitle">Wall Street Multi-Factor Quant &amp; Loop Execution Terminal</p>
+        </div>
+      </div>
+
+      <div class="search-cluster">
+        <form id="tickerForm" class="search-form" autocomplete="off">
+          <span class="search-icon" aria-hidden="true">🔍</span>
+          <input
+            id="tickerInput"
+            type="text"
+            value="NVDA"
+            maxlength="10"
+            enterkeyhint="search"
+            autocorrect="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            placeholder="티커 (NVDA, TSLA)"
+            aria-label="종목 티커 입력"
+            class="ticker-input"
+          />
+          <button type="submit" class="btn-primary">분석</button>
+        </form>
+
+        <div id="quickTickers" class="quick-tickers" aria-label="주요 종목 바로가기"></div>
+      </div>
+    </div>
+
+    <div class="macro-strip">
+      <div class="container-shell macro-grid">
+        <div class="macro-item">
+          <span class="macro-label">공포탐욕지수 (F&amp;G)</span>
+          <div class="macro-value-wrap">
+            <span id="fgValue" class="macro-value">--</span>
+            <span id="fgBadge" class="badge neutral">계산중</span>
+          </div>
+        </div>
+
+        <div class="macro-item">
+          <span class="macro-label">VIX 변동성 지수</span>
+          <div class="macro-value-wrap">
+            <span id="vixValue" class="macro-value">--</span>
+            <span id="vixBadge" class="badge neutral">계산중</span>
+          </div>
+        </div>
+
+        <div class="macro-item">
+          <span class="macro-label">지정학적 위기 지수 (GPR)</span>
+          <div class="macro-value-wrap">
+            <span id="gprValue" class="macro-value">--</span>
+            <span id="gprBadge" class="badge neutral">계산중</span>
+          </div>
+        </div>
+
+        <div class="macro-item macro-meta">
+          <span class="macro-label">루프 동기화 주기 (1.5s)</span>
+          <div class="macro-value-wrap">
+            <span id="activeTfMacro" class="macro-tf">실시간</span>
+            <span id="lastSyncTime" class="macro-time">--:--:--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container-shell main-shell">
+    <section class="card tf-card" aria-label="차트 봉 주기 및 표시 설정">
+      <div class="tf-header-row">
+        <div class="tf-title-group">
+          <span class="section-kicker">TIMEFRAME &amp; CHART SETTINGS</span>
+          <span id="tfSummaryBadge" class="tf-active-pill">현재 주기: 실시간 · 지표 동기화 활성</span>
+        </div>
+        <div class="overlay-toggles">
+          <button type="button" id="toggleMddBtn" class="overlay-btn active" aria-pressed="true">MDD 라인</button>
+          <button type="button" id="toggleEnvBtn" class="overlay-btn active" aria-pressed="true">Envelope</button>
+          <button type="button" id="toggleSrBtn" class="overlay-btn active" aria-pressed="true">지지/저항선</button>
+        </div>
+      </div>
+
+      <div id="timeframeBar" class="tf-scroll-row" role="tablist" aria-label="봉 주기 선택"></div>
+    </section>
+
+    <section class="top-tri-grid">
+      <article class="card chart-card">
+        <div class="card-head">
+          <div>
+            <div class="ticker-heading-row">
+              <h2 id="chartTickerTitle" class="ticker-heading">NVDA</h2>
+              <span id="chartTfTag" class="badge info">실시간</span>
+              <span id="chartPrice" class="price-readout">$0.00</span>
+              <span id="chartChange" class="change-readout">+0.00%</span>
+            </div>
+            <p id="chartSubMeta" class="card-sub">실시간 가격 · Envelope 밴드 · 지지/저항 · 최대낙폭(MDD) 라인</p>
+          </div>
+          <div class="mdd-box">
+            <span class="mini-label">현재 MDD</span>
+            <span id="currentMddVal" class="mdd-val">0.00%</span>
+          </div>
+        </div>
+
+        <div class="chart-stage">
+          <canvas id="priceMddChart"></canvas>
+        </div>
+
+        <div class="chart-legend-strip">
+          <span><i class="dot price-dot"></i>종가</span>
+          <span><i class="dot env-dot"></i>Envelope 상/하단</span>
+          <span><i class="dot res-dot"></i>저항(R1)</span>
+          <span><i class="dot sup-dot"></i>지지(S1)</span>
+          <span><i class="dot mdd-dot"></i>MDD 낙폭선</span>
+        </div>
+      </article>
+
+      <article class="card osc-card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">WALL ST. SIGNAL OSCILLATOR</span>
+            <h2 class="card-title">매수 / 매도 시그널 오실레이터</h2>
+          </div>
+          <span id="oscSignalBadge" class="signal-badge hold">관망 (NEUTRAL)</span>
+        </div>
+
+        <div class="osc-metric-row">
+          <div>
+            <span class="mini-label">오실레이터 지수 (-100 ~ +100)</span>
+            <div id="oscScoreVal" class="osc-score-num">0.0</div>
+          </div>
+          <div class="osc-bar-wrap">
+            <div class="osc-bar-labels">
+              <span>SELL (-100)</span>
+              <span>0</span>
+              <span>BUY (+100)</span>
+            </div>
+            <div class="osc-bar-track">
+              <div id="oscBarFill" class="osc-bar-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="osc-chart-stage">
+          <canvas id="oscillatorChart"></canvas>
+        </div>
+
+        <div id="indicatorGrid" class="indicator-grid"></div>
+      </article>
+
+      <article class="card score-card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">INNO COMPOSITE QUANT SCORE</span>
+            <h2 class="card-title">퀀트 종합 점수 (1~100)</h2>
+          </div>
+          <span id="quantGradeBadge" class="badge info">TIER A</span>
+        </div>
+
+        <div class="score-hero">
+          <div class="score-ring-wrap">
+            <div id="quantScoreCircle" class="score-circle">
+              <span id="quantScoreNum" class="score-num">--</span>
+              <span class="score-den">/ 100</span>
+            </div>
+          </div>
+          <div class="score-summary">
+            <div id="quantActionText" class="score-action">퀀트 시그널 분석 중</div>
+            <p id="quantFormulaDesc" class="score-desc">
+              기술지표(35%) · 다크풀/기관/스마트머니/옵션(40%) · 매크로/지정학/섹터(25%) 실시간 산출
+            </p>
+          </div>
+        </div>
+
+        <div id="factorBreakdown" class="breakdown-list"></div>
+      </article>
+    </section>
+
+    <section class="mid-tri-grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">SHORT &amp; OPTIONS FLOW</span>
+            <h2 class="card-title">공매도 · 풋/콜 옵션 우위 &amp; 위험도</h2>
+          </div>
+          <span id="riskLevelBadge" class="badge warn">위험도 보통</span>
+        </div>
+
+        <div class="kv-grid">
+          <div class="kv-box">
+            <span class="mini-label">풋/콜 옵션 비율 (P/C)</span>
+            <strong id="pcRatioVal" class="kv-val">0.00</strong>
+            <span id="optionDominanceText" class="kv-sub">우위 판별 중</span>
+          </div>
+          <div class="kv-box">
+            <span class="mini-label">공매도 비율 (Short Interest)</span>
+            <strong id="shortInterestVal" class="kv-val">0.0%</strong>
+            <span id="shortCoverDays" class="kv-sub">커버링 --일</span>
+          </div>
+          <div class="kv-box">
+            <span class="mini-label">다크풀 거래 비중</span>
+            <strong id="darkPoolShareVal" class="kv-val">0.0%</strong>
+            <span id="darkPoolBias" class="kv-sub">기관 블록 수급</span>
+          </div>
+          <div class="kv-box">
+            <span class="mini-label">포트폴리오 위험도 (VaR 95%)</span>
+            <strong id="varRiskVal" class="kv-val">0.00%</strong>
+            <span id="riskScoreSub" class="kv-sub">위험점수 --/100</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">GLOBAL SOCIAL SENTIMENT</span>
+            <h2 class="card-title">글로벌 SNS 투자 심리 지수 (1~100)</h2>
+          </div>
+          <span id="snsMoodBadge" class="badge info">중립</span>
+        </div>
+
+        <div class="sns-hero">
+          <div>
+            <span class="mini-label">통합 소셜 모멘텀 지수</span>
+            <div class="sns-score-row">
+              <strong id="snsScoreVal" class="sns-score-num">50</strong>
+              <span class="score-den">/ 100</span>
+            </div>
+          </div>
+          <span id="snsMentionDelta" class="badge pos">멘션 +0.0%</span>
+        </div>
+
+        <div class="progress-track">
+          <div id="snsProgressFill" class="progress-fill" style="width: 50%;"></div>
+        </div>
+
+        <div id="snsChannels" class="sns-channel-list"></div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">SUPPORT &amp; RESISTANCE</span>
+            <h2 class="card-title">지지와 저항 가격대</h2>
+          </div>
+          <span id="srTfBadge" class="badge neutral">실시간</span>
+        </div>
+
+        <div id="srLevelsList" class="sr-list"></div>
+      </article>
+    </section>
+
+    <section class="bottom-split-grid">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">INSTITUTIONAL, SMART MONEY &amp; MACRO</span>
+            <h2 class="card-title">기관·스마트머니 포지션 &amp; 거시경제 뉴스</h2>
+          </div>
+          <span class="badge info">실시간 루프</span>
+        </div>
+
+        <div id="flowMacroGrid" class="flow-macro-grid"></div>
+
+        <div class="news-block">
+          <h3 class="sub-section-title">거시경제 · 수급 헤드라인</h3>
+          <ul id="macroNewsList" class="news-list"></ul>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <span class="section-kicker">US SECTOR ROTATION FLOW</span>
+            <h2 class="card-title">미국 증시 주요 섹터별 수급 이동 현황</h2>
+          </div>
+          <span class="badge pos">자금 순유입 추적</span>
+        </div>
+
+        <div id="sectorFlowList" class="sector-list"></div>
+      </article>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
