@@ -742,28 +742,51 @@
         </div>
       </div>
 
-      <!-- 8. Fear & Greed, VIX, Geopolitical Risk Index -->
-      <div class="card">
+      <!-- 8A. Individual VIX Volatility Index Card -->
+      <div class="card" id="card-vix">
         <div class="card-head">
-          <span class="card-title">글로벌 리스크 · 센티먼트 지표</span>
-          <span class="pill" id="macroStatusPill">실시간 연동</span>
+          <span class="card-title">VIX 변동성 지수 (CBOE ^VIX)</span>
+          <span class="pill" id="vixSourcePill">실시간 조회</span>
         </div>
-        <div class="macro-grid-3">
-          <div class="macro-box">
-            <div class="macro-lbl">공포·탐욕 지수</div>
-            <div class="macro-val" id="fgValue">--</div>
-            <div class="macro-tag" id="fgLabel">조회 중</div>
-          </div>
-          <div class="macro-box">
-            <div class="macro-lbl">VIX 변동성 지수</div>
-            <div class="macro-val" id="vixValue">--</div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+          <div>
+            <div class="macro-val" style="font-size:24px;" id="vixValue">--</div>
             <div class="macro-tag" id="vixLabel">조회 중</div>
           </div>
-          <div class="macro-box">
-            <div class="macro-lbl">지정학적 위기 지수</div>
-            <div class="macro-val" id="geoValue">--</div>
+          <div class="muted" id="vixDetailText" style="text-align:right;">30일 예상 S&amp;P 500 내재변동성</div>
+        </div>
+      </div>
+
+      <!-- 8B. Individual Fear & Greed Index Card -->
+      <div class="card" id="card-fg">
+        <div class="card-head">
+          <span class="card-title">공포·탐욕 지수 (Fear &amp; Greed Index · 1~100)</span>
+          <span class="pill" id="fgSourcePill">개별 산출</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+          <div>
+            <div class="macro-val" style="font-size:24px;" id="fgValue">--</div>
+            <div class="macro-tag" id="fgLabel">조회 중</div>
+          </div>
+          <div class="muted" id="fgDetailText" style="text-align:right;">시장 심리·추세·옵션·VIX 반영</div>
+        </div>
+        <div class="meter-track" style="margin-top:8px;">
+          <div class="meter-fill" id="fgMeterBar" style="width:25%; background:#ef4444;"></div>
+        </div>
+      </div>
+
+      <!-- 8C. Geopolitical Risk Index Card -->
+      <div class="card" id="card-geo">
+        <div class="card-head">
+          <span class="card-title">지정학적 위기 지수 (GPR)</span>
+          <span class="pill" id="geoSourcePill">리스크 모델</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+          <div>
+            <div class="macro-val" style="font-size:22px;" id="geoValue">--</div>
             <div class="macro-tag" id="geoLabel">GPR 모델</div>
           </div>
+          <div class="muted" style="text-align:right;">글로벌 지정학 긴장도 반영</div>
         </div>
       </div>
 
@@ -960,7 +983,10 @@
       sourceLabel: "초기화 중",
       isLive: false,
       vix: 24.5,
+      vixLive: false,
       fearGreed: 24,
+      fgLive: false,
+      fgRatingText: "",
       geoRisk: 118
     };
 
@@ -1199,6 +1225,36 @@
           return parseYahooPayload(txt);
         })
       );
+    }
+
+    async function fetchFearGreedLive() {
+      const endpoints = [
+        "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+        `https://api.allorigins.win/raw?url=${encodeURIComponent("https://production.dataviz.cnn.io/index/fearandgreed/graphdata")}`,
+        `https://corsproxy.io/?url=${encodeURIComponent("https://production.dataviz.cnn.io/index/fearandgreed/graphdata")}`
+      ];
+
+      try {
+        const val = await Promise.any(
+          endpoints.map(async (u) => {
+            const r = await fetchWithTimeout(u, { cache: "no-store" }, 4200);
+            if (!r.ok) throw new Error("fg http");
+            let data = JSON.parse(await r.text());
+            if (typeof data?.contents === "string") data = JSON.parse(data.contents);
+            const score = Number(data?.fear_and_greed?.score);
+            if (!Number.isFinite(score) || score < 0 || score > 100) {
+              throw new Error("fg invalid score");
+            }
+            return {
+              score: Math.round(score),
+              rating: String(data?.fear_and_greed?.rating || "")
+            };
+          })
+        );
+        return val;
+      } catch (e) {
+        return null;
+      }
     }
 
     async function fetchVixLive() {
@@ -1533,21 +1589,67 @@
       document.getElementById("dispPriceMeta").textContent =
         `전일종가: ${fmtPrice(appState.prevClose)} · 고/저: ${fmtPrice(appState.dayHigh)} / ${fmtPrice(appState.dayLow)} · 구간 MDD: ${mddInfo.maxMddPct.toFixed(2)}%`;
 
-      // Macro 8
-      const fgEl = document.getElementById("fgValue");
-      const fgLblEl = document.getElementById("fgLabel");
-      fgEl.textContent = `${q.fearGreed}`;
-      if (q.fearGreed <= 25) { fgEl.className = "macro-val neg"; fgLblEl.textContent = "극단적 공포"; fgLblEl.className = "macro-tag neg"; }
-      else if (q.fearGreed <= 45) { fgEl.className = "macro-val warn-txt"; fgLblEl.textContent = "공포 구간"; fgLblEl.className = "macro-tag warn-txt"; }
-      else if (q.fearGreed >= 70) { fgEl.className = "macro-val pos"; fgLblEl.textContent = "탐욕 우위"; fgLblEl.className = "macro-tag pos"; }
-      else { fgEl.className = "macro-val neu"; fgLblEl.textContent = "중립 구간"; fgLblEl.className = "macro-tag neu"; }
-
+      // 8A. Individual VIX Display
       const vixEl = document.getElementById("vixValue");
       const vixLblEl = document.getElementById("vixLabel");
+      const vixPill = document.getElementById("vixSourcePill");
+      const vixDetail = document.getElementById("vixDetailText");
       vixEl.textContent = `${appState.vix.toFixed(2)}`;
-      if (appState.vix >= 25) { vixEl.className = "macro-val neg"; vixLblEl.textContent = "고변동성 주의"; vixLblEl.className = "macro-tag neg"; }
-      else if (appState.vix >= 18) { vixEl.className = "macro-val warn-txt"; vixLblEl.textContent = "경계 수준"; vixLblEl.className = "macro-tag warn-txt"; }
-      else { vixEl.className = "macro-val pos"; vixLblEl.textContent = "안정 구간"; vixLblEl.className = "macro-tag pos"; }
+      if (appState.vix >= 25) { vixEl.className = "macro-val neg"; vixLblEl.textContent = "고변동성 주의 (≥25)"; vixLblEl.className = "macro-tag neg"; }
+      else if (appState.vix >= 18) { vixEl.className = "macro-val warn-txt"; vixLblEl.textContent = "경계 수준 (18~25)"; vixLblEl.className = "macro-tag warn-txt"; }
+      else { vixEl.className = "macro-val pos"; vixLblEl.textContent = "안정 구간 (<18)"; vixLblEl.className = "macro-tag pos"; }
+      if (vixPill) {
+        vixPill.textContent = appState.vixLive ? "^VIX 실시간" : "^VIX 모델";
+        vixPill.className = `pill ${appState.vixLive ? "live" : "warn"}`;
+      }
+      if (vixDetail) {
+        vixDetail.textContent = appState.vixLive ? "CBOE ^VIX 시세 반영" : "실시간 조회 대기·보정값";
+      }
+
+      // 8B. Individual Fear & Greed Display
+      const fgDisplayScore = appState.fgLive ? appState.fearGreed : q.fearGreed;
+      const fgEl = document.getElementById("fgValue");
+      const fgLblEl = document.getElementById("fgLabel");
+      const fgPill = document.getElementById("fgSourcePill");
+      const fgBar = document.getElementById("fgMeterBar");
+      const fgDetail = document.getElementById("fgDetailText");
+
+      fgEl.textContent = `${fgDisplayScore}`;
+      let fgColor = "#38bdf8";
+      if (fgDisplayScore <= 25) {
+        fgEl.className = "macro-val neg";
+        fgLblEl.textContent = "극단적 공포 (Extreme Fear)";
+        fgLblEl.className = "macro-tag neg";
+        fgColor = "#ef4444";
+      } else if (fgDisplayScore <= 45) {
+        fgEl.className = "macro-val warn-txt";
+        fgLblEl.textContent = "공포 구간 (Fear)";
+        fgLblEl.className = "macro-tag warn-txt";
+        fgColor = "#f59e0b";
+      } else if (fgDisplayScore >= 70) {
+        fgEl.className = "macro-val pos";
+        fgLblEl.textContent = "탐욕 우위 (Greed)";
+        fgLblEl.className = "macro-tag pos";
+        fgColor = "#22c55e";
+      } else {
+        fgEl.className = "macro-val neu";
+        fgLblEl.textContent = "중립 구간 (Neutral)";
+        fgLblEl.className = "macro-tag neu";
+        fgColor = "#38bdf8";
+      }
+      if (fgBar) {
+        fgBar.style.width = `${Math.max(2, Math.min(100, fgDisplayScore))}%`;
+        fgBar.style.background = fgColor;
+      }
+      if (fgPill) {
+        fgPill.textContent = appState.fgLive ? "F&G 실시간" : "F&G 개별 산출";
+        fgPill.className = `pill ${appState.fgLive ? "live" : "warn"}`;
+      }
+      if (fgDetail) {
+        fgDetail.textContent = appState.fgLive
+          ? `심리 피드 연동 (${appState.fgRatingText || "실시간"})`
+          : "모멘텀·옵션·VIX 독립 산출";
+      }
 
       const geoEl = document.getElementById("geoValue");
       const geoLblEl = document.getElementById("geoLabel");
@@ -1651,8 +1753,9 @@
       document.querySelectorAll(".tf-btn").forEach((b) => b.classList.toggle("active", b.dataset.tf === tf));
       document.getElementById("headerSub").textContent = `${symbol} · ${tf} · 실시간 퀀트 & MDD`;
 
-      // Fetch VIX in parallel
+      // Fetch VIX and Fear & Greed independently in parallel
       const vixPromise = fetchVixLive();
+      const fgPromise = fetchFearGreedLive();
 
       let marketData = null;
       if (appState.keys.twelveKey) {
@@ -1671,9 +1774,21 @@
         }
       }
 
-      const liveVix = await vixPromise;
+      const [liveVix, liveFg] = await Promise.all([vixPromise, fgPromise]);
       if (typeof liveVix === "number" && Number.isFinite(liveVix)) {
         appState.vix = liveVix;
+        appState.vixLive = true;
+      } else {
+        appState.vixLive = false;
+      }
+
+      if (liveFg && typeof liveFg.score === "number" && Number.isFinite(liveFg.score)) {
+        appState.fearGreed = liveFg.score;
+        appState.fgRatingText = liveFg.rating || "";
+        appState.fgLive = true;
+      } else {
+        appState.fgLive = false;
+        appState.fgRatingText = "";
       }
 
       appState.series = marketData.series;
