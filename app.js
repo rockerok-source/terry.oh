@@ -1,16 +1,16 @@
 const TIMEFRAMES = {
-  LIVE: { label: "실시간", range: "1d", interval: "1m", vol: 0.004, mult: 0.65 },
-  "1m": { label: "1분봉", range: "1d", interval: "1m", vol: 0.006, mult: 0.72 },
-  "3m": { label: "3분봉", range: "1d", interval: "5m", vol: 0.008, mult: 0.78 },
-  "5m": { label: "5분봉", range: "1d", interval: "5m", vol: 0.010, mult: 0.84 },
-  "10m": { label: "10분봉", range: "5d", interval: "15m", vol: 0.012, mult: 0.90 },
-  "15m": { label: "15분봉", range: "5d", interval: "15m", vol: 0.015, mult: 1.00 },
-  "30m": { label: "30분봉", range: "5d", interval: "30m", vol: 0.019, mult: 1.12 },
-  "60m": { label: "60분봉", range: "1mo", interval: "60m", vol: 0.024, mult: 1.25 },
-  "240m": { label: "240분봉", range: "3mo", interval: "1d", vol: 0.032, mult: 1.45 },
-  "1D": { label: "일봉", range: "6mo", interval: "1d", vol: 0.045, mult: 1.75 },
-  "1W": { label: "주봉", range: "2y", interval: "1wk", vol: 0.075, mult: 2.30 },
-  "1M": { label: "월봉", range: "5y", interval: "1mo", vol: 0.120, mult: 3.10 }
+  LIVE: { label: "실시간", range: "1D", interval: "1m", vol: 0.004, mult: 0.65 },
+  "1m": { label: "1분봉", range: "1D", interval: "1m", vol: 0.006, mult: 0.72 },
+  "3m": { label: "3분봉", range: "1D", interval: "5m", vol: 0.008, mult: 0.78 },
+  "5m": { label: "5분봉", range: "1D", interval: "5m", vol: 0.010, mult: 0.84 },
+  "10m": { label: "10분봉", range: "5D", interval: "15m", vol: 0.012, mult: 0.90 },
+  "15m": { label: "15분봉", range: "5D", interval: "15m", vol: 0.015, mult: 1.00 },
+  "30m": { label: "30분봉", range: "5D", interval: "30m", vol: 0.019, mult: 1.12 },
+  "60m": { label: "60분봉", range: "1M", interval: "60m", vol: 0.024, mult: 1.25 },
+  "240m": { label: "240분봉", range: "3M", interval: "1D", vol: 0.032, mult: 1.45 },
+  "1D": { label: "일봉", range: "6M", interval: "1D", vol: 0.045, mult: 1.75 },
+  "1W": { label: "주봉", range: "1Y", interval: "1W", vol: 0.075, mult: 2.30 },
+  "1M": { label: "월봉", range: "5Y", interval: "1M", vol: 0.120, mult: 3.10 }
 };
 
 const TICKER_PRESETS = {
@@ -25,6 +25,7 @@ const TICKER_PRESETS = {
 };
 
 const CORS_PROXIES = [
+  (url) => url,
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`
 ];
@@ -40,6 +41,7 @@ const state = {
   oscSeries: [],
   dataSourceMode: "SIMULATION",
   lastSyncTime: "",
+  lastErrorReason: "",
   macro: {
     fg: 64,
     fgRating: "탐욕",
@@ -91,60 +93,87 @@ function recomputeDerived() {
   });
 }
 
-async function fetchJsonWithProxy(targetUrl, timeoutMs = 4500) {
-  const candidates = [
-    targetUrl,
-    ...CORS_PROXIES.map((makeProxy) => makeProxy(targetUrl))
-  ];
-
-  for (const url of candidates) {
+async function fetchJsonWithProxy(targetUrl, timeoutMs = 5000) {
+  let lastErr = "응답 없음";
+  for (const makeProxy of CORS_PROXIES) {
+    const url = makeProxy(targetUrl);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
       clearTimeout(timer);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        lastErr = `HTTP ${res.status}`;
+        continue;
+      }
       const text = await res.text();
-      if (!text) continue;
+      if (!text) {
+        lastErr = "빈 응답";
+        continue;
+      }
       const parsed = JSON.parse(text);
       if (parsed && typeof parsed.contents === "string") {
-        return JSON.parse(parsed.contents);
+        return { data: JSON.parse(parsed.contents), error: "" };
       }
-      return parsed;
-    } catch {
+      return { data: parsed, error: "" };
+    } catch (err) {
       clearTimeout(timer);
+      lastErr = err?.name === "AbortError" ? "타임아웃" : "CORS/네트워크 차단";
     }
   }
-  return null;
+  return { data: null, error: lastErr };
 }
 
-async function fetchYahooChart(symbol, range, interval) {
-  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&includePrePost=true`;
-  const data = await fetchJsonWithProxy(yahooUrl);
-  const result = data?.chart?.result?.[0];
-  if (!result) return null;
+function extractCnbcPrices(payload) {
+  const prices = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node.last === "number" && Number.isFinite(node.last) && node.last > 0) {
+      prices.push(+node.last.toFixed(2));
+    } else if (typeof node.price === "number" && Number.isFinite(node.price) && node.price > 0) {
+      prices.push(+node.price.toFixed(2));
+    } else if (typeof node.close === "number" && Number.isFinite(node.close) && node.close > 0) {
+      prices.push(+node.close.toFixed(2));
+    } else if (typeof node.value === "number" && Number.isFinite(node.value) && node.value > 0) {
+      prices.push(+node.value.toFixed(2));
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(payload);
+  return prices.slice(-60);
+}
 
-  const closes = result?.indicators?.quote?.[0]?.close || [];
-  const cleanPrices = closes
-    .filter((v) => typeof v === "number" && Number.isFinite(v) && v > 0)
-    .slice(-60)
-    .map((v) => +v.toFixed(2));
+async function fetchCnbcChart(symbol, span, interval) {
+  const cnbcChartUrl = `https://ts-api.cnbc.com/harmony/app/bars/chart/${encodeURIComponent(symbol)}/${encodeURIComponent(span)}/${encodeURIComponent(interval)}/adjusted/EST/120/`;
+  const chartRes = await fetchJsonWithProxy(cnbcChartUrl);
+  let extracted = chartRes.data ? extractCnbcPrices(chartRes.data) : [];
 
-  const metaPrice = result?.meta?.regularMarketPrice;
-  if (typeof metaPrice === "number" && Number.isFinite(metaPrice) && metaPrice > 0) {
-    if (cleanPrices.length > 0) {
-      cleanPrices[cleanPrices.length - 1] = +metaPrice.toFixed(2);
+  if (extracted.length < 2) {
+    const cnbcQuoteUrl = `https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols=${encodeURIComponent(symbol)}&requestMethod=itv&noCache=1&partnerId=2&fund=1&exthrs=1&output=json`;
+    const quoteRes = await fetchJsonWithProxy(cnbcQuoteUrl);
+    const quoteList = quoteRes.data?.FormattedQuoteResult?.FormattedQuote;
+    const item = Array.isArray(quoteList) ? quoteList[0] : quoteList;
+    const rawLast = item?.last ?? item?.last_timed ?? item?.price;
+    const numLast = typeof rawLast === "string" ? parseFloat(rawLast.replace(/,/g, "")) : Number(rawLast);
+    if (Number.isFinite(numLast) && numLast > 0) {
+      const baseSeries = state.prices.length >= 2 ? state.prices.slice(-29) : [numLast * 0.99, numLast * 0.995];
+      baseSeries.push(+numLast.toFixed(2));
+      extracted = baseSeries;
     } else {
-      cleanPrices.push(+metaPrice.toFixed(2));
+      return { prices: null, error: chartRes.error || quoteRes.error || "CNBC 데이터 파싱 실패" };
     }
   }
 
-  return cleanPrices.length >= 2 ? cleanPrices : null;
+  return { prices: extracted, error: "" };
 }
 
 async function fetchCnnFearAndGreed() {
   const cnnUrl = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata";
-  const data = await fetchJsonWithProxy(cnnUrl);
+  const { data } = await fetchJsonWithProxy(cnnUrl);
   const fgScore = data?.fear_and_greed?.score;
   const fgRating = data?.fear_and_greed?.rating;
   if (typeof fgScore === "number" && Number.isFinite(fgScore)) {
@@ -165,25 +194,28 @@ async function fetchCnnFearAndGreed() {
   return null;
 }
 
-async function syncRealMarketData() {
+async function syncCnbcMarketData() {
   const tf = TIMEFRAMES[state.timeframe];
-  const [tickerPrices, vixPrices, fgData] = await Promise.all([
-    fetchYahooChart(state.ticker, tf.range, tf.interval),
-    fetchYahooChart("^VIX", "5d", "15m"),
+  const [tickerRes, vixRes, fgData] = await Promise.all([
+    fetchCnbcChart(state.ticker, tf.range, tf.interval),
+    fetchCnbcChart(".VIX", "5D", "15m"),
     fetchCnnFearAndGreed()
   ]);
 
   let updatedAny = false;
 
-  if (tickerPrices && tickerPrices.length >= 2) {
-    state.prices = tickerPrices;
-    state.dataSourceMode = "LIVE_YAHOO";
+  if (tickerRes.prices && tickerRes.prices.length >= 2) {
+    state.prices = tickerRes.prices;
+    state.dataSourceMode = "LIVE_CNBC";
+    state.lastErrorReason = "";
     recomputeDerived();
     updatedAny = true;
+  } else {
+    state.lastErrorReason = tickerRes.error || "CNBC 호출 실패";
   }
 
-  if (vixPrices && vixPrices.length > 0) {
-    state.macro.vix = +vixPrices[vixPrices.length - 1].toFixed(2);
+  if (vixRes.prices && vixRes.prices.length > 0) {
+    state.macro.vix = +vixRes.prices[vixRes.prices.length - 1].toFixed(2);
     updatedAny = true;
   }
 
@@ -194,8 +226,7 @@ async function syncRealMarketData() {
   }
 
   if (updatedAny) {
-    const now = new Date();
-    state.lastSyncTime = now.toTimeString().slice(0, 8);
+    state.lastSyncTime = new Date().toTimeString().slice(0, 8);
   }
 
   renderDashboard();
@@ -372,9 +403,9 @@ function drawCharts(ind) {
 function renderDashboard() {
   const ind = computeIndicators();
   const chgPct = (((ind.last - ind.first) / (ind.first || 1)) * 100).toFixed(2);
-  const modeLabel = state.dataSourceMode === "LIVE_YAHOO"
-    ? `실시세 ${state.lastSyncTime || "SYNC"}`
-    : "시뮬레이션(피드대기)";
+  const modeLabel = state.dataSourceMode === "LIVE_CNBC"
+    ? `CNBC ${state.lastSyncTime || "SYNC"}`
+    : `시뮬레이션(${state.lastErrorReason || "CNBC대기"})`;
 
   document.getElementById("activeTfPill").textContent = `${ind.tf.label} · ${modeLabel}`;
   document.getElementById("indTfLabel").textContent = ind.tf.label;
@@ -493,7 +524,7 @@ document.getElementById("tickerForm").addEventListener("submit", (e) => {
   document.querySelectorAll(".q-chip").forEach((b) => b.classList.toggle("active", b.dataset.ticker === val));
   generateFallbackSeries();
   renderDashboard();
-  syncRealMarketData();
+  syncCnbcMarketData();
 });
 
 document.getElementById("quickTickers").addEventListener("click", (e) => {
@@ -504,7 +535,7 @@ document.getElementById("quickTickers").addEventListener("click", (e) => {
   document.querySelectorAll(".q-chip").forEach((b) => b.classList.toggle("active", b === btn));
   generateFallbackSeries();
   renderDashboard();
-  syncRealMarketData();
+  syncCnbcMarketData();
 });
 
 document.getElementById("tfSelector").addEventListener("click", (e) => {
@@ -514,7 +545,7 @@ document.getElementById("tfSelector").addEventListener("click", (e) => {
   document.querySelectorAll(".tf-btn").forEach((b) => b.classList.toggle("active", b === btn));
   generateFallbackSeries();
   renderDashboard();
-  syncRealMarketData();
+  syncCnbcMarketData();
 });
 
 ["toggleMdd", "toggleEnv", "toggleSr"].forEach((id) => {
@@ -527,11 +558,11 @@ document.getElementById("tfSelector").addEventListener("click", (e) => {
 });
 
 setInterval(() => {
-  syncRealMarketData();
+  syncCnbcMarketData();
 }, 15000);
 
 window.addEventListener("resize", renderDashboard);
 
 generateFallbackSeries();
 renderDashboard();
-syncRealMarketData();
+syncCnbcMarketData();
